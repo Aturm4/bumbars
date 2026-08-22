@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
-import './globals.css';
+import './bumbars.css';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     description: 'Постоянный симулятор жизни для друзей с ИИ-ведущим.',
     locale: 'ru_RU',
     type: 'website',
-    images: [{ url: '/og.png', width: 1730, height: 909, alt: 'Bumbars — ваша жизнь разворачивается' }],
+    images: [{ url: '/og.png', width: 1200, height: 630, alt: 'Bumbars — карта решений и ресурсов' }],
   },
   twitter: {
     card: 'summary_large_image',

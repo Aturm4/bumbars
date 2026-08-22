@@ -54,3 +54,14 @@
 - [ ] notifications;
 - [ ] observability, backups и Linux deployment;
 - [ ] нагрузочные и security tests.
+
+## Промежуточный серверный срез Sites/D1 — выполнено
+
+- [x] постоянная D1 schema и migration;
+- [x] player, wallet, ledger, routines и domain events;
+- [x] ActionProposal, confirmation, cancel, running и resolved;
+- [x] идемпотентное списание и request-driven reconciliation;
+- [x] клиент переведён с simulation state на API;
+- [ ] Telegram identity вместо тестового игрока;
+- [ ] PostgreSQL adapter и постоянная очередь;
+- [ ] double-entry ledger вместо текущего append-only wallet ledger.
