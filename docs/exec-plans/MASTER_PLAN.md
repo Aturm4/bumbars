@@ -16,32 +16,32 @@
 - [x] метаданные и социальный preview;
 - [x] финальная проверка сборки и lint.
 
-## Фаза 2 — core backend — ожидает
+## Фаза 2 — core backend — выполняется
 
 - [ ] PostgreSQL и migrations;
-- [ ] identity, player и character;
-- [ ] entity-component registry;
-- [ ] event store и audit log;
-- [ ] API contracts и OpenAPI.
+- [x] identity verifier abstraction, player и character;
+- [x] entity-component registry и capability gaps;
+- [x] domain events, AgentRun и audit primitives;
+- [x] API contracts; [ ] OpenAPI generation.
 
-## Фаза 3 — deterministic engine — ожидает
+## Фаза 3 — deterministic engine — вертикальный срез выполнен
 
-- [ ] ActionProposal validator;
-- [ ] confirmation tokens;
-- [ ] effects и reproducible RNG;
-- [ ] capacities и cooldowns;
-- [ ] idempotent persistent scheduler.
+- [x] ActionProposal validator;
+- [x] confirmation tokens;
+- [x] effects и reproducible RNG;
+- [x] capacities; [ ] cooldowns;
+- [x] idempotent reconciliation; [ ] отдельный persistent worker.
 
-## Фаза 4 — экономика и планирование — ожидает
+## Фаза 4 — экономика и планирование — выполняется
 
-- [ ] double-entry ledger;
+- [x] double-entry ledger для действий;
 - [ ] recurring actions;
-- [ ] contracts, employment и ownership;
+- [x] contracts, employment и ownership primitives;
 - [ ] market engine.
 
 ## Фаза 5 — AI orchestration — ожидает
 
-- [ ] skill router;
+- [x] skill router;
 - [ ] context builder;
 - [ ] referee, narrator и world director;
 - [ ] schema-bound tool calls;
@@ -64,4 +64,4 @@
 - [x] клиент переведён с simulation state на API;
 - [ ] Telegram identity вместо тестового игрока;
 - [ ] PostgreSQL adapter и постоянная очередь;
-- [ ] double-entry ledger вместо текущего append-only wallet ledger.
+- [x] double-entry journal entries/postings для стартового баланса и действий.

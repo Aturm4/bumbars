@@ -41,3 +41,13 @@ Entity, ComponentDefinition, EntityComponent, Player, Character, ActionProposal,
 Клиент не хранит игровое состояние локально и читает его из `/api/state`. Команды действий и ритуалов проходят через route handlers, доменный модуль и D1 adapter. D1 используется для развёрнутого прототипа; целевое production-хранилище остаётся PostgreSQL.
 
 Текущий scheduler работает как restart-safe reconciliation: при запросе сервер находит просроченные running actions, идемпотентно применяет эффекты и пишет ledger/domain event. Это промежуточная реализация до постоянной очереди и отдельного worker.
+
+## Реализованный world slice
+
+D1 schema включает персонажей, механику действий, двойной журнал, географию, знания/утверждения, навыки/опыт/документы, цели, активы, организации/членство/доли, отношения/репутацию, события/рынки, договоры, сюжетные нити, расследования, component registry, capability gaps, AgentRun и чат.
+
+Вероятность хранится в basis points. При reconciliation сервер получает roll из сохранённого seed, фиксирует его рядом с действием и только затем применяет условный результат. Для денежных затрат и наград создаются две противоположные проводки с одним reference.
+
+## Документы
+
+Игровой дизайн: docs/product/vision-and-game-design.md. Каноническая модель: docs/architecture/data-model.md. ИИ и Telegram: docs/architecture/ai-and-telegram.md. API: docs/architecture/api-contracts.md. Production gaps: docs/capability-gaps.md.

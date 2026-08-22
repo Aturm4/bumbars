@@ -1,5 +1,5 @@
-import BumbarsClient from './BumbarsClient';
+import GameApp from './GameApp';
 
 export default function Page() {
-  return <BumbarsClient />;
+  return <GameApp />;
 }

@@ -36,3 +36,27 @@
 6. Ритуалы и дневной план.
 7. AI orchestrator с domain skill router.
 8. Уведомления в личном боте и общем новостном чате.
+
+## Обязательный жизненный цикл команды
+
+Намерение пользователя не является мутацией. Сначала создаётся ActionProposal. Сервер добавляет каталожные параметры, проверяет actor, права, ресурсы, capacity и допустимый риск. Платные, опасные, необратимые и ownership-команды требуют отдельного подтверждения. После confirm создаётся persistent job; RNG и effects выполняет сервер, затем Narrator описывает уже зафиксированный исход.
+
+## Обязательные домены
+
+- география, перемещение и видимость;
+- расписания, зависимости, recurring и recovery;
+- образование, skills, experience evidence и credentials;
+- карьера, employment, организации, ownership и contracts;
+- личные и корпоративные финансы, assets, debt, market и escrow;
+- отношения, доменная репутация, claims, investigations и story threads;
+- world director, события, dormant safety, legacy и восстановление группы.
+
+## Приёмочные ограничения
+
+- нет глобального level;
+- Player и Character разделены;
+- foreground-занятость Character не блокирует Player;
+- World Truth, Knowledge и Claims не смешиваются;
+- ИИ не выполняет SQL и не является scheduler;
+- любой финансовый эффект имеет сбалансированные проводки;
+- любой roll воспроизводим;

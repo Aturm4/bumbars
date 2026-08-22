@@ -43,3 +43,26 @@ Frontend simulation state удалён из пользовательского �
 ## Следующий шаг
 
 Заменить тестовую identity на Telegram init data, перенести D1 adapter на целевой PostgreSQL и вынести reconciliation в постоянный scheduler/очередь без изменения API-контрактов UI.
+
+## 22 августа 2026 — игровой world slice
+
+Прочитан полный продуктовый диалог и реализован следующий вертикальный слой.
+
+- интерфейс перепроектирован как настольная игровая экспедиция, а не трекер привычек;
+- добавлены оригинальные ассеты мира, Хоста и social preview;
+- состояние расширено персонажем, локациями, навыками, опытом, образованием, активами, организациями, отношениями, репутацией, занятостью, рынками и сюжетными нитями;
+- действие хранит capacity, вероятность, seed, roll и outcome;
+- foreground и background валидируются сервером;
+- стартовый баланс, стоимость и награды проходят через сбалансированные JournalEntry/JournalPosting;
+- добавлены entity-component registry, capability gaps, knowledge/claims, contracts, cases, AgentRun и chat primitives;
+- добавлены skill router, development AI provider и Telegram initData verifier;
+- PWA manifest и service worker подключены;
+- все пользовательские строки остались русскими.
+
+### Проверки
+
+- npm run typecheck: успешно;
+- npm run build: успешно;
+- npm run lint: успешно после устранения единственного предупреждения;
+- интеграционный API-сценарий: proposal, confirm, повторный confirm, foreground conflict и background parallelism — успешно;
+- повторное подтверждение списывает деньги ровно один раз;

@@ -1,5 +1,6 @@
 import type {
   ActionKind,
+  CapacityKind,
   ActionStatus,
   EventState,
   GameAction,
@@ -8,6 +9,8 @@ import type {
   RoutineState,
   RoutineStatus,
 } from '@/lib/game-types';
+import { getExtendedState, seedExtendedWorld } from '@/lib/server/profile';
+import { routeSkills } from '@/lib/ai/skill-router';
 import { ensureSchema } from '@/lib/server/db';
 
 const PLAYER_ID = 'demo-alex';
@@ -21,6 +24,9 @@ type ActionDefinition = {
   rewardFocus: number;
   rewardHealth: number;
   rewardMoneyCents: number;
+  difficultyLabel: string;
+  capacity: CapacityKind;
+  baseProbabilityBp: number;
   riskLabel: string;
 };
 
@@ -35,6 +41,9 @@ const ACTION_CATALOG: Record<ActionKind, ActionDefinition> = {
     rewardHealth: 3,
     rewardMoneyCents: 0,
     riskLabel: 'Низкий',
+    difficultyLabel: 'Обычная',
+    capacity: 'foreground',
+    baseProbabilityBp: 8600,
   },
   study: {
     title: 'Учебный спринт',
@@ -46,6 +55,9 @@ const ACTION_CATALOG: Record<ActionKind, ActionDefinition> = {
     rewardHealth: 0,
     rewardMoneyCents: 0,
     riskLabel: 'Нет',
+    difficultyLabel: 'Обычная',
+    capacity: 'background',
+    baseProbabilityBp: 9000,
   },
   work: {
     title: 'Рабочий контракт',
@@ -57,6 +69,9 @@ const ACTION_CATALOG: Record<ActionKind, ActionDefinition> = {
     rewardHealth: 0,
     rewardMoneyCents: 75_000_000,
     riskLabel: 'Низкий',
+    difficultyLabel: 'Обычная',
+    capacity: 'foreground',
+    baseProbabilityBp: 8200,
   },
   meditation: {
     title: 'Практика внимания',
@@ -68,6 +83,9 @@ const ACTION_CATALOG: Record<ActionKind, ActionDefinition> = {
     rewardHealth: 1,
     rewardMoneyCents: 0,
     riskLabel: 'Нет',
+    difficultyLabel: 'Лёгкая',
+    capacity: 'background',
+    baseProbabilityBp: 9700,
   },
   travel: {
     title: 'Поездка по Ташкенту',
@@ -79,6 +97,9 @@ const ACTION_CATALOG: Record<ActionKind, ActionDefinition> = {
     rewardHealth: 0,
     rewardMoneyCents: 0,
     riskLabel: 'Средний',
+    difficultyLabel: 'Обычная',
+    capacity: 'foreground',
+    baseProbabilityBp: 9400,
   },
 };
 
@@ -108,6 +129,12 @@ type ActionRow = {
   reward_health: number;
   reward_money_cents: number;
   risk_label: string;
+  difficulty_label: string;
+  capacity: CapacityKind;
+  probability_bp: number;
+  rng_seed: string;
+  roll_bp: number | null;
+  succeeded: number | null;
   created_at: string;
   confirmed_at: string | null;
   due_at: string | null;
@@ -211,6 +238,7 @@ async function ensurePlayer(): Promise<D1Database> {
       .bind(PLAYER_ID, now),
   ]);
 
+  await seedExtendedWorld(db, PLAYER_ID, now);
   return db;
 }
 
@@ -245,8 +273,9 @@ async function reconcileDueActions(db: D1Database): Promise<void> {
   const now = new Date().toISOString();
   const due = await db
     .prepare(
-      `SELECT * FROM actions
-       WHERE player_id = ? AND status = 'running' AND due_at <= ?
+      `SELECT a.*, m.difficulty_label, m.capacity, m.probability_bp, m.rng_seed, m.roll_bp, m.succeeded
+       FROM actions a JOIN action_mechanics m ON m.action_id = a.id
+       WHERE a.player_id = ? AND a.status = 'running' AND a.due_at <= ?
        ORDER BY due_at ASC LIMIT 20`,
     )
     .bind(PLAYER_ID, now)
@@ -254,7 +283,9 @@ async function reconcileDueActions(db: D1Database): Promise<void> {
 
   for (const action of due.results) {
     const token = uid('resolve');
-    const outcome = actionOutcome(action);
+    const rollBp = await seededRollBp(action.rng_seed);
+    const succeeded = rollBp < action.probability_bp;
+    const outcome = succeeded ? actionOutcome(action) : 'Попытка не удалась. Расходы и полученный опыт сохранены в истории.';
     const statements: D1PreparedStatement[] = [
       db
         .prepare(
@@ -271,17 +302,34 @@ async function reconcileDueActions(db: D1Database): Promise<void> {
              SELECT 1 FROM actions WHERE id = ? AND transition_token = ?
            )`,
         )
-        .bind(action.reward_focus, action.reward_health, PLAYER_ID, action.id, token),
+        .bind(succeeded ? action.reward_focus : 0, succeeded ? action.reward_health : 0, PLAYER_ID, action.id, token),
       db
         .prepare(
           `INSERT INTO domain_events (id, player_id, type, title, body, action_id, created_at)
            SELECT ?, ?, 'action_resolved', ?, ?, ?, ?
            WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`,
         )
-        .bind(uid('event'), PLAYER_ID, 'Действие завершено', outcome, action.id, now, action.id, token),
+        .bind(uid('event'), PLAYER_ID, succeeded ? 'Действие удалось' : 'Действие не удалось', outcome, action.id, now, action.id, token),
     ];
 
-    if (action.reward_money_cents > 0) {
+    statements.push(
+      db.prepare(`UPDATE action_mechanics
+        SET roll_bp = ?, succeeded = ?, resolved_at = ?
+        WHERE action_id = ? AND roll_bp IS NULL`)
+        .bind(rollBp, succeeded ? 1 : 0, now, action.id),
+      db.prepare(`INSERT OR IGNORE INTO experience_events
+        (id, character_id, domain, title, outcome, complexity, occurred_at)
+        VALUES (?, 'character-alex', ?, ?, ?, ?, ?)`)
+        .bind(
+          `experience-${action.id}`,
+          action.kind,
+          action.title,
+          succeeded ? 'success' : 'failure',
+          action.difficulty_label.toLowerCase(),
+          now,
+        ),
+    );
+    if (action.reward_money_cents > 0 && succeeded) {
       statements.splice(
         2,
         0,
@@ -311,6 +359,7 @@ async function reconcileDueActions(db: D1Database): Promise<void> {
             token,
           ),
       );
+      statements.push(...journalStatements(db, 'reward', action.id, `Доход: ${action.title}`, action.reward_money_cents, now, token));
     }
 
     await db.batch(statements);
@@ -331,6 +380,11 @@ function mapAction(row: ActionRow): GameAction {
     rewardHealth: row.reward_health,
     rewardMoneyCents: row.reward_money_cents,
     riskLabel: row.risk_label,
+    difficultyLabel: row.difficulty_label,
+    capacity: row.capacity,
+    probabilityPercent: row.probability_bp / 100,
+    rollPercent: row.roll_bp === null ? null : row.roll_bp / 100,
+    succeeded: row.succeeded === null ? null : row.succeeded === 1,
     createdAt: row.created_at,
     confirmedAt: row.confirmed_at,
     dueAt: row.due_at,
@@ -380,7 +434,7 @@ export async function getGameState(): Promise<GameState> {
     db.prepare('SELECT * FROM players WHERE id = ?').bind(PLAYER_ID).first<PlayerRow>(),
     db.prepare('SELECT * FROM wallets WHERE player_id = ?').bind(PLAYER_ID).first<WalletRow>(),
     db
-      .prepare('SELECT * FROM actions WHERE player_id = ? ORDER BY created_at DESC LIMIT 30')
+      .prepare('SELECT a.*, m.difficulty_label, m.capacity, m.probability_bp, m.rng_seed, m.roll_bp, m.succeeded FROM actions a JOIN action_mechanics m ON m.action_id = a.id WHERE a.player_id = ? ORDER BY a.created_at DESC LIMIT 30')
       .bind(PLAYER_ID)
       .all<ActionRow>(),
     db
@@ -396,6 +450,7 @@ export async function getGameState(): Promise<GameState> {
       .bind(PLAYER_ID)
       .all<EventRow>(),
   ]);
+  const extended = await getExtendedState(db, PLAYER_ID);
 
   if (!player || !wallet) {
     throw new DomainError('Не удалось загрузить состояние игрока', 'STATE_NOT_FOUND', 500);
@@ -403,6 +458,7 @@ export async function getGameState(): Promise<GameState> {
 
   return {
     player,
+    ...extended,
     wallet: { balanceCents: wallet.balance_cents, currency: wallet.currency },
     actions: actions.results.map(mapAction),
     routines: routines.results.map(mapRoutine),
@@ -439,6 +495,16 @@ export async function proposeAction(input: {
   const now = new Date().toISOString();
   const actionId = uid('action');
   const description = intent || definition.description;
+  const [playerState, characterState] = await Promise.all([
+    db.prepare('SELECT focus, health FROM players WHERE id = ?').bind(PLAYER_ID).first<{ focus: number; health: number }>(),
+    db.prepare('SELECT fatigue FROM characters WHERE player_id = ?').bind(PLAYER_ID).first<{ fatigue: number }>(),
+  ]);
+  if (!playerState || !characterState) {
+    throw new DomainError('Состояние персонажа не найдено', 'STATE_NOT_FOUND', 500);
+  }
+  const probabilityBp = calculateProbability(definition, playerState.focus, playerState.health, characterState.fatigue);
+  const rngSeed = crypto.randomUUID();
+  const routedSkills = routeSkills(kind).map((skill) => `${skill.key}@${skill.version}`);
 
   await db.batch([
     db
@@ -465,6 +531,21 @@ export async function proposeAction(input: {
         now,
         uid('proposal'),
       ),
+    db.prepare(`INSERT INTO action_mechanics
+      (action_id, difficulty_label, capacity, probability_bp, rng_seed, roll_bp, succeeded, resolved_at)
+      VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL)`)
+      .bind(actionId, definition.difficultyLabel, definition.capacity, probabilityBp, rngSeed),
+    db.prepare(`INSERT INTO agent_runs
+      (id, player_id, role, prompt_version, provider, skill_keys, status, created_at)
+      VALUES (?, ?, 'referee', 'referee.v1', 'deterministic-mock', ?, 'validated', ?)`)
+      .bind(uid('agent'), PLAYER_ID, JSON.stringify(routedSkills), now),
+    db.prepare(`INSERT INTO chat_messages
+      (id, player_id, role, source, body, created_at) VALUES (?, ?, 'player', 'WEB', ?, ?)`)
+      .bind(uid('chat'), PLAYER_ID, description, now),
+    db.prepare(`INSERT INTO chat_messages
+      (id, player_id, role, source, body, created_at) VALUES (?, ?, 'host', 'WEB', ?, ?)`)
+      .bind(uid('chat'), PLAYER_ID,
+        `Я собрал карточку «${definition.title}». Оценка успеха ${(probabilityBp / 100).toFixed(0)}%; запуск — только после твоего подтверждения.`, now),
     db
       .prepare(
         `INSERT INTO domain_events (id, player_id, type, title, body, action_id, created_at)
@@ -480,7 +561,7 @@ export async function confirmAction(actionId: string): Promise<GameState> {
   const db = await ensurePlayer();
   await reconcileDueActions(db);
   const action = await db
-    .prepare('SELECT * FROM actions WHERE id = ? AND player_id = ?')
+    .prepare('SELECT a.*, m.difficulty_label, m.capacity, m.probability_bp, m.rng_seed, m.roll_bp, m.succeeded FROM actions a JOIN action_mechanics m ON m.action_id = a.id WHERE a.id = ? AND a.player_id = ?')
     .bind(actionId, PLAYER_ID)
     .first<ActionRow>();
 
@@ -496,6 +577,19 @@ export async function confirmAction(actionId: string): Promise<GameState> {
     .bind(PLAYER_ID)
     .first<{ balance_cents: number }>();
   if (!player || !wallet) throw new DomainError('Ресурсы игрока не найдены', 'STATE_NOT_FOUND', 500);
+
+  if (action.capacity === 'foreground') {
+    const occupied = await db.prepare(
+      `SELECT a.title FROM actions a JOIN action_mechanics m ON m.action_id = a.id
+       WHERE a.player_id = ? AND a.status = 'running' AND m.capacity = 'foreground' AND a.id != ? LIMIT 1`,
+    ).bind(PLAYER_ID, actionId).first<{ title: string }>();
+    if (occupied) {
+      throw new DomainError(
+        `Персонаж уже занят: ${occupied.title}. Планировать можно, запускать второе физическое действие — нет.`,
+        'FOREGROUND_CAPACITY_OCCUPIED', 409,
+      );
+    }
+  }
   if (player.energy < action.energy_cost) {
     throw new DomainError('Недостаточно энергии для этого действия', 'NOT_ENOUGH_ENERGY', 409);
   }
@@ -554,6 +648,7 @@ export async function confirmAction(actionId: string): Promise<GameState> {
         )
         .bind(uid('ledger'), PLAYER_ID, `Расход: ${action.title}`, -action.cost_cents, actionId, now, actionId, token),
     );
+    statements.push(...journalStatements(db, 'expense', actionId, `Расход: ${action.title}`, action.cost_cents, now, token));
   }
 
   await db.batch(statements);
@@ -662,4 +757,46 @@ export async function mutateRoutine(
       .bind(uid('event'), PLAYER_ID, existing.title, selected.body, now),
   ]);
   return getGameState();
+}
+
+function calculateProbability(definition: ActionDefinition, focus: number, health: number, fatigue: number): number {
+  const stateModifier = (focus - 50) * 8 + (health - 50) * 4 - fatigue * 5;
+  return Math.max(500, Math.min(9900, definition.baseProbabilityBp + stateModifier));
+}
+
+// Доменные playbook выбирает versioned Skill Router.
+function journalStatements(
+  db: D1Database,
+  referenceType: 'expense' | 'reward',
+  actionId: string,
+  title: string,
+  amountCents: number,
+  now: string,
+  transitionToken: string,
+): D1PreparedStatement[] {
+  const journalId = `journal-${referenceType}-${actionId}`;
+  const debitAccount = referenceType === 'expense' ? 'account-world-services' : 'account-alex-cash';
+  const creditAccount = referenceType === 'expense' ? 'account-alex-cash' : 'account-world-rewards';
+  return [
+    db.prepare(`INSERT OR IGNORE INTO journal_entries
+      (id, reference_type, reference_id, title, created_at)
+      SELECT ?, ?, ?, ?, ? WHERE EXISTS
+      (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`)
+      .bind(journalId, referenceType, actionId, title, now, actionId, transitionToken),
+    db.prepare(`INSERT OR IGNORE INTO journal_postings
+      (id, journal_entry_id, account_id, side, amount_cents, created_at)
+      VALUES (?, ?, ?, 'debit', ?, ?)`)
+      .bind(`posting-${referenceType}-debit-${actionId}`, journalId, debitAccount, amountCents, now),
+    db.prepare(`INSERT OR IGNORE INTO journal_postings
+      (id, journal_entry_id, account_id, side, amount_cents, created_at)
+      VALUES (?, ?, ?, 'credit', ?, ?)`)
+      .bind(`posting-${referenceType}-credit-${actionId}`, journalId, creditAccount, amountCents, now),
+  ];
+}
+
+async function seededRollBp(seed: string): Promise<number> {
+  const bytes = new TextEncoder().encode(seed);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const number = new DataView(digest).getUint32(0, false);
+  return number % 10_000;
 }

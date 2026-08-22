@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { SCHEMA_STATEMENTS } from '@/db/schema';
+import { WORLD_SCHEMA_STATEMENTS } from '@/db/world-schema';
 
 type Bindings = { DB: D1Database };
 
@@ -16,7 +17,7 @@ export function getDb(): D1Database {
 export async function ensureSchema(): Promise<D1Database> {
   const db = getDb();
   schemaReady ??= db
-    .batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)))
+    .batch([...SCHEMA_STATEMENTS, ...WORLD_SCHEMA_STATEMENTS].map((statement) => db.prepare(statement)))
     .then(() => undefined)
     .catch((error) => {
       schemaReady = undefined;
