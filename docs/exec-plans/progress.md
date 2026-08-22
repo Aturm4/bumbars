@@ -66,3 +66,6 @@ Frontend simulation state удалён из пользовательского �
 - npm run lint: успешно после устранения единственного предупреждения;
 - интеграционный API-сценарий: proposal, confirm, повторный confirm, foreground conflict и background parallelism — успешно;
 - повторное подтверждение списывает деньги ровно один раз;
+- reconciliation сохранил и опубликовал фактические RNG-roll и успех/неудачу;
+- приватная production-версия 3 развёрнута на Sites, production API smoke-test успешен;
+- browser-control QA заблокирована системным Windows ACL до подключения к странице; сборка, API и production runtime проверены отдельно.
