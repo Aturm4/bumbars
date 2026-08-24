@@ -11,9 +11,11 @@ import type {
 } from '@/lib/game-types';
 import { getExtendedState, seedExtendedWorld } from '@/lib/server/profile';
 import { routeSkills } from '@/lib/ai/skill-router';
+import { DeterministicDevelopmentProvider } from '@/lib/ai/provider';
 import { ensureSchema } from '@/lib/server/db';
 
 const PLAYER_ID = 'demo-alex';
+const DEVELOPMENT_AI = new DeterministicDevelopmentProvider();
 
 type ActionDefinition = {
   title: string;
@@ -135,6 +137,7 @@ type ActionRow = {
   rng_seed: string;
   roll_bp: number | null;
   succeeded: number | null;
+  target_location_id: string | null;
   created_at: string;
   confirmed_at: string | null;
   due_at: string | null;
@@ -242,17 +245,6 @@ async function ensurePlayer(): Promise<D1Database> {
   return db;
 }
 
-function detectKind(intent: string): ActionKind | null {
-  const normalized = intent.toLocaleLowerCase('ru-RU');
-  const rules: Array<[ActionKind, string[]]> = [
-    ['training', ['трен', 'зал', 'спорт', 'силов', 'gym']],
-    ['study', ['уч', 'курс', 'книг', 'эконом', 'study']],
-    ['work', ['работ', 'контракт', 'проект', 'задач', 'work']],
-    ['meditation', ['медит', 'дых', 'отдох', 'вниман']],
-    ['travel', ['поезд', 'съезд', 'маршрут', 'район', 'travel']],
-  ];
-  return rules.find(([, words]) => words.some((word) => normalized.includes(word)))?.[0] ?? null;
-}
 
 function actionOutcome(action: ActionRow): string {
   switch (action.kind) {
@@ -273,8 +265,9 @@ async function reconcileDueActions(db: D1Database): Promise<void> {
   const now = new Date().toISOString();
   const due = await db
     .prepare(
-      `SELECT a.*, m.difficulty_label, m.capacity, m.probability_bp, m.rng_seed, m.roll_bp, m.succeeded
+      `SELECT a.*, m.difficulty_label, m.capacity, m.probability_bp, m.rng_seed, m.roll_bp, m.succeeded, t.entity_id target_location_id
        FROM actions a JOIN action_mechanics m ON m.action_id = a.id
+       LEFT JOIN action_targets t ON t.action_id = a.id AND t.entity_type = 'location'
        WHERE a.player_id = ? AND a.status = 'running' AND a.due_at <= ?
        ORDER BY due_at ASC LIMIT 20`,
     )
@@ -329,6 +322,21 @@ async function reconcileDueActions(db: D1Database): Promise<void> {
           now,
         ),
     );
+    if (action.kind === 'travel' && action.target_location_id && succeeded) {
+      statements.push(
+        db.prepare(`UPDATE character_locations
+          SET location_id = ?,
+              visited_json = CASE
+                WHEN EXISTS (SELECT 1 FROM json_each(visited_json) WHERE value = ?)
+                THEN visited_json
+                ELSE json_insert(visited_json, '$[#]', ?)
+              END,
+              updated_at = ?
+          WHERE character_id = 'character-alex'
+            AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`)
+          .bind(action.target_location_id, action.target_location_id, action.target_location_id, now, action.id, token),
+      );
+    }
     if (action.reward_money_cents > 0 && succeeded) {
       statements.splice(
         2,
@@ -390,6 +398,7 @@ function mapAction(row: ActionRow): GameAction {
     dueAt: row.due_at,
     resolvedAt: row.resolved_at,
     outcome: row.outcome,
+    targetLocationId: row.target_location_id,
   };
 }
 
@@ -434,7 +443,7 @@ export async function getGameState(): Promise<GameState> {
     db.prepare('SELECT * FROM players WHERE id = ?').bind(PLAYER_ID).first<PlayerRow>(),
     db.prepare('SELECT * FROM wallets WHERE player_id = ?').bind(PLAYER_ID).first<WalletRow>(),
     db
-      .prepare('SELECT a.*, m.difficulty_label, m.capacity, m.probability_bp, m.rng_seed, m.roll_bp, m.succeeded FROM actions a JOIN action_mechanics m ON m.action_id = a.id WHERE a.player_id = ? ORDER BY a.created_at DESC LIMIT 30')
+      .prepare("SELECT a.*, m.difficulty_label, m.capacity, m.probability_bp, m.rng_seed, m.roll_bp, m.succeeded, t.entity_id target_location_id FROM actions a JOIN action_mechanics m ON m.action_id = a.id LEFT JOIN action_targets t ON t.action_id = a.id AND t.entity_type = 'location' WHERE a.player_id = ? ORDER BY a.created_at DESC LIMIT 30")
       .bind(PLAYER_ID)
       .all<ActionRow>(),
     db
@@ -471,6 +480,7 @@ export async function getGameState(): Promise<GameState> {
 export async function proposeAction(input: {
   intent?: unknown;
   kind?: unknown;
+  targetLocationId?: unknown;
 }): Promise<GameState> {
   const db = await ensurePlayer();
   await reconcileDueActions(db);
@@ -483,7 +493,8 @@ export async function proposeAction(input: {
   const explicitKind = typeof input.kind === 'string' && input.kind in ACTION_CATALOG
     ? (input.kind as ActionKind)
     : null;
-  const kind = explicitKind ?? detectKind(intent);
+  const interpreted = !explicitKind && intent ? await DEVELOPMENT_AI.interpretIntent(intent) : null;
+  const kind = explicitKind ?? interpreted?.kind ?? null;
   if (!kind) {
     throw new DomainError(
       'Не понял намерение. Упомяните тренировку, учёбу, работу, медитацию или поездку.',
@@ -491,10 +502,34 @@ export async function proposeAction(input: {
     );
   }
 
-  const definition = ACTION_CATALOG[kind];
+  const requestedTargetId = typeof input.targetLocationId === 'string' ? input.targetLocationId.trim() : '';
+  const targetLocation = requestedTargetId && kind === 'travel'
+    ? await db.prepare(`SELECT id, name, note, risk_label, travel_cost_cents, travel_minutes
+        FROM locations WHERE id = ? AND kind IN ('district', 'region')`)
+      .bind(requestedTargetId)
+      .first<{
+        id: string;
+        name: string;
+        note: string;
+        risk_label: string;
+        travel_cost_cents: number;
+        travel_minutes: number;
+      }>()
+    : null;
+  if (requestedTargetId && !targetLocation) {
+    throw new DomainError('Маршрут не найден или недоступен для поездки', 'INVALID_TRAVEL_TARGET', 404);
+  }
+  const definition: ActionDefinition = targetLocation ? {
+    ...ACTION_CATALOG.travel,
+    title: `Поездка: ${targetLocation.name}`,
+    description: targetLocation.note,
+    durationSeconds: Math.max(60, targetLocation.travel_minutes * 60),
+    costCents: targetLocation.travel_cost_cents,
+    riskLabel: targetLocation.risk_label,
+  } : ACTION_CATALOG[kind];
   const now = new Date().toISOString();
   const actionId = uid('action');
-  const description = intent || definition.description;
+  const description = intent || (targetLocation ? `Поехать в ${targetLocation.name}. ${targetLocation.note}` : definition.description);
   const [playerState, characterState] = await Promise.all([
     db.prepare('SELECT focus, health FROM players WHERE id = ?').bind(PLAYER_ID).first<{ focus: number; health: number }>(),
     db.prepare('SELECT fatigue FROM characters WHERE player_id = ?').bind(PLAYER_ID).first<{ fatigue: number }>(),
@@ -506,7 +541,7 @@ export async function proposeAction(input: {
   const rngSeed = crypto.randomUUID();
   const routedSkills = routeSkills(kind).map((skill) => `${skill.key}@${skill.version}`);
 
-  await db.batch([
+  const statements: D1PreparedStatement[] = [
     db
       .prepare(
         `INSERT INTO actions
@@ -537,8 +572,8 @@ export async function proposeAction(input: {
       .bind(actionId, definition.difficultyLabel, definition.capacity, probabilityBp, rngSeed),
     db.prepare(`INSERT INTO agent_runs
       (id, player_id, role, prompt_version, provider, skill_keys, status, created_at)
-      VALUES (?, ?, 'referee', 'referee.v1', 'deterministic-mock', ?, 'validated', ?)`)
-      .bind(uid('agent'), PLAYER_ID, JSON.stringify(routedSkills), now),
+      VALUES (?, ?, 'referee', 'referee.v1', ?, ?, 'validated', ?)`)
+      .bind(uid('agent'), PLAYER_ID, DEVELOPMENT_AI.name, JSON.stringify(routedSkills), now),
     db.prepare(`INSERT INTO chat_messages
       (id, player_id, role, source, body, created_at) VALUES (?, ?, 'player', 'WEB', ?, ?)`)
       .bind(uid('chat'), PLAYER_ID, description, now),
@@ -552,7 +587,16 @@ export async function proposeAction(input: {
          VALUES (?, ?, 'action_proposed', 'Хост подготовил предложение', ?, ?, ?)`,
       )
       .bind(uid('event'), PLAYER_ID, `${definition.title}: требуется подтверждение.`, actionId, now),
-  ]);
+  ];
+  if (targetLocation) {
+    statements.push(
+      db.prepare(`INSERT INTO action_targets
+        (action_id, entity_type, entity_id, created_at)
+        VALUES (?, 'location', ?, ?)`)
+        .bind(actionId, targetLocation.id, now),
+    );
+  }
+  await db.batch(statements);
 
   return getGameState();
 }
@@ -561,7 +605,7 @@ export async function confirmAction(actionId: string): Promise<GameState> {
   const db = await ensurePlayer();
   await reconcileDueActions(db);
   const action = await db
-    .prepare('SELECT a.*, m.difficulty_label, m.capacity, m.probability_bp, m.rng_seed, m.roll_bp, m.succeeded FROM actions a JOIN action_mechanics m ON m.action_id = a.id WHERE a.id = ? AND a.player_id = ?')
+    .prepare("SELECT a.*, m.difficulty_label, m.capacity, m.probability_bp, m.rng_seed, m.roll_bp, m.succeeded, t.entity_id target_location_id FROM actions a JOIN action_mechanics m ON m.action_id = a.id LEFT JOIN action_targets t ON t.action_id = a.id AND t.entity_type = 'location' WHERE a.id = ? AND a.player_id = ?")
     .bind(actionId, PLAYER_ID)
     .first<ActionRow>();
 

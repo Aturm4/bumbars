@@ -1,7 +1,7 @@
 import type { ActionKind } from '@/lib/game-types';
 
 export interface InterpretedIntent {
-  kind: ActionKind;
+  kind: ActionKind | null;
   difficulty: 'easy' | 'ordinary' | 'hard';
   risk: 'none' | 'low' | 'medium' | 'high';
   relevantDomains: string[];
@@ -18,16 +18,18 @@ export class DeterministicDevelopmentProvider implements AiProvider {
 
   async interpretIntent(input: string): Promise<InterpretedIntent> {
     const normalized = input.toLocaleLowerCase('ru-RU');
-    const kind: ActionKind = normalized.includes('трен') || normalized.includes('зал')
+    const kind: ActionKind | null = normalized.includes('трен') || normalized.includes('зал') || normalized.includes('спорт')
       ? 'training'
-      : normalized.includes('уч') || normalized.includes('курс')
+      : normalized.includes('уч') || normalized.includes('курс') || normalized.includes('книг')
         ? 'study'
-        : normalized.includes('работ') || normalized.includes('проект')
+        : normalized.includes('работ') || normalized.includes('проект') || normalized.includes('контракт')
           ? 'work'
-          : normalized.includes('медит') || normalized.includes('дых')
+          : normalized.includes('медит') || normalized.includes('дых') || normalized.includes('вниман')
             ? 'meditation'
-            : 'travel';
-    return { kind, difficulty: 'ordinary', risk: kind === 'travel' ? 'medium' : 'low', relevantDomains: [kind] };
+            : normalized.includes('поезд') || normalized.includes('съезд') || normalized.includes('маршрут') || normalized.includes('район')
+              ? 'travel'
+              : null;
+    return { kind, difficulty: 'ordinary', risk: kind === 'travel' ? 'medium' : kind ? 'low' : 'none', relevantDomains: kind ? [kind] : [] };
   }
 
   async narrate(input: { canonicalOutcome: string; visibleKnowledge: string[] }): Promise<string> {

@@ -21,6 +21,12 @@ export const WORLD_SCHEMA_STATEMENTS = [
     succeeded INTEGER,
     resolved_at TEXT
   )`,
+  `CREATE TABLE IF NOT EXISTS action_targets (
+    action_id TEXT PRIMARY KEY REFERENCES actions(id),
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('location')),
+    entity_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS ledger_accounts (
     id TEXT PRIMARY KEY,
     owner_id TEXT NOT NULL,
@@ -274,6 +280,8 @@ export const WORLD_SCHEMA_STATEMENTS = [
     ON world_events(happened_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_chat_player_time
     ON chat_messages(player_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_action_targets_entity
+    ON action_targets(entity_type, entity_id)`,
   `CREATE INDEX IF NOT EXISTS idx_journal_postings_entry
     ON journal_postings(journal_entry_id)`,
 ] as const;

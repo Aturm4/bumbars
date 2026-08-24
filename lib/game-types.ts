@@ -50,6 +50,7 @@ export interface GameAction {
   dueAt: string | null;
   resolvedAt: string | null;
   outcome: string | null;
+  targetLocationId: string | null;
 }
 export interface CharacterState {
   id: string;
@@ -208,8 +209,20 @@ export interface ProfileState {
 export interface WorldState {
   currentLocationId: string;
   locations: LocationState[];
+  players: WorldPlayerState[];
   events: WorldEventState[];
   markets: MarketState[];
+}
+
+export interface WorldPlayerState {
+  id: string;
+  name: string;
+  role: string;
+  color: 'lime' | 'coral' | 'violet' | 'amber';
+  locationId: string;
+  mapLocationId: string;
+  status: CharacterState['status'];
+  isCurrent: boolean;
 }
 
 

@@ -55,6 +55,16 @@ function statusText(action: GameAction): string {
     failed: 'Не удалось',
   }[action.status];
 }
+function assetKindText(kind: string): string {
+  return {
+    inventory: 'инвентарь',
+    property: 'недвижимость',
+    vehicle: 'транспорт',
+    investment: 'инвестиция',
+    equity: 'доля в компании',
+  }[kind] ?? 'актив';
+}
+
 
 function GameActionCard({
   action,
@@ -158,7 +168,7 @@ function ProfileContent({ state, page, finished }: { state: GameState; page: Pro
 
   if (page === 'assets') {
     return <div className="profile-ledger-grid">
-      <section className="profile-book-card wide"><small>АКТИВЫ</small><h2>То, чем персонаж действительно владеет</h2>{state.profile.assets.map((asset) => <article className="asset-record" key={asset.id}><div><strong>{asset.title}</strong><small>{asset.locationName} · {asset.kind}</small></div><b>{formatMoney(asset.estimatedValueCents)}</b><em>быстрая продажа: {formatMoney(asset.liquidationValueCents)}</em></article>)}</section>
+      <section className="profile-book-card wide"><small>АКТИВЫ</small><h2>То, чем персонаж действительно владеет</h2>{state.profile.assets.map((asset) => <article className="asset-record" key={asset.id}><div><strong>{asset.title}</strong><small>{asset.locationName} · {assetKindText(asset.kind)}</small></div><b>{formatMoney(asset.estimatedValueCents)}</b><em>быстрая продажа: {formatMoney(asset.liquidationValueCents)}</em></article>)}</section>
       {state.profile.organizations.map((org) => <section className="profile-book-card wide organization-record" key={org.id}><small>ОРГАНИЗАЦИЯ</small><h2>{org.name}</h2><p>{org.kind} · {org.role} · доля {org.ownershipPercent}%</p><dl><div><dt>Казна</dt><dd>{formatMoney(org.cashCents)}</dd></div><div><dt>Выручка / месяц</dt><dd>{formatMoney(org.monthlyRevenueCents)}</dd></div><div><dt>Прибыль / месяц</dt><dd>{formatMoney(org.monthlyProfitCents)}</dd></div><div><dt>Участники</dt><dd>{org.members}</dd></div></dl></section>)}
     </div>;
   }
@@ -245,8 +255,8 @@ export default function GameApp() {
     }
   }, []);
 
-  const propose = useCallback(async (kind?: ActionKind, intent?: string) => {
-    const ok = await request('/api/actions', { method: 'POST', body: JSON.stringify({ kind, intent: intent ?? hostIntent }) }, 'proposal', 'Хост подготовил карточку решения.');
+  const propose = useCallback(async (kind?: ActionKind, intent?: string, targetLocationId?: string) => {
+    const ok = await request('/api/actions', { method: 'POST', body: JSON.stringify({ kind, intent: intent ?? hostIntent, targetLocationId }) }, 'proposal', 'Хост подготовил карточку решения.');
     if (ok) {
       setHostIntent('');
       setView('host');
@@ -293,6 +303,8 @@ export default function GameApp() {
   const districts = state.world.locations.filter((location) => location.kind === 'district' || location.kind === 'region');
   const selectedZone = zones.find((zone) => zone.id === selectedZoneId) ?? zones[0];
   const selectedDistrict = districts.find((district) => district.id === selectedDistrictId) ?? districts[0];
+  const currentWorldPlayer = state.world.players.find((player) => player.isCurrent);
+  const currentDistrictId = currentWorldPlayer?.mapLocationId ?? 'district-home';
 
   return (
     <main className={`bumbars-game view-${view}`}>
@@ -313,38 +325,117 @@ export default function GameApp() {
 
       <section className="game-canvas">
         {view === 'home' && (
-          <div className="home-world">
-            <div className="zone-field">
-              {zones.map((zone) => <button key={zone.id} className={`world-zone ${selectedZone?.id === zone.id ? 'selected' : ''}`} style={{ left: `${zone.x}%`, top: `${zone.y}%` }} onClick={() => setSelectedZoneId(zone.id)}><span>{zone.glyph}</span><strong>{zone.name}</strong></button>)}
+          <div className="quarter-screen game-screen-panel">
+            <header className="campaign-title">
+              <div><small>ЖИВОЙ ИГРОВОЙ СТОЛ</small><h1>Квартал</h1><p>Выбирай место, собирай ход и следи, где сейчас друзья.</p></div>
+              <div className="turn-marker"><span>ХОД</span><strong>{active ? 'идёт' : 'свободен'}</strong><small>день {dayNumber(state.serverTime)}</small></div>
+            </header>
+            <div className="quarter-board">
+              <div className="board-path path-one" aria-hidden="true" />
+              <div className="board-path path-two" aria-hidden="true" />
+              <div className="board-campfire" aria-hidden="true"><i>✦</i><span>общий двор</span></div>
+              <section className="place-deck" aria-label="Места квартала">
+                {zones.map((zone, index) => {
+                  const playersHere = state.world.players.filter((player) => player.locationId === zone.id);
+                  return (
+                    <button
+                      key={zone.id}
+                      className={`place-tile place-slot-${index + 1} ${selectedZone?.id === zone.id ? 'selected' : ''}`}
+                      aria-pressed={selectedZone?.id === zone.id}
+                      onClick={() => setSelectedZoneId(zone.id)}
+                    >
+                      <span className="tile-pin">{zone.glyph}</span>
+                      <span className="place-art" aria-hidden="true"><i /><b /><em /></span>
+                      <span className="tile-copy"><strong>{zone.name}</strong><small>{zone.note}</small></span>
+                      <span className="pawn-row">
+                        {playersHere.map((player) => <span key={player.id} className={`player-pawn pawn-${player.color} ${player.isCurrent ? 'current' : ''}`} title={`${player.name}: ${player.role}`}><i>{player.name.slice(0, 1)}</i><small>{player.name}</small></span>)}
+                        {!playersHere.length && <small className="empty-place">сейчас пусто</small>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </section>
+              <aside className="turn-scroll">
+                <div className="scroll-ribbon">ТЕКУЩИЙ ХОД</div>
+                {active ? (
+                  <>
+                    <small>{active.status === 'running' ? 'ПЕРСОНАЖ ЗАНЯТ' : 'ЖДЁТ ПОДТВЕРЖДЕНИЯ'}</small>
+                    <h2>{active.title}</h2>
+                    <p>{active.description}</p>
+                    {active.status === 'running' ? (
+                      <div className="big-timer"><strong>{remaining(active, clockNow)}</strong><i><b style={{ width: `${Math.max(4, Math.min(100, ((new Date(active.dueAt ?? 0).getTime() - clockNow) / (active.durationSeconds * 1000)) * 100))}%` }} /></i></div>
+                    ) : (
+                      <><div className="quest-cost"><span>{active.costCents ? formatMoney(active.costCents) : 'без расходов'}</span><span>−{active.energyCost} энергии</span></div><div className="scroll-decisions"><button disabled={busy === active.id} onClick={() => confirmAction(active.id)}>Начать</button><button disabled={busy === active.id} onClick={() => cancelAction(active.id)}>Отказаться</button></div></>
+                    )}
+                  </>
+                ) : (
+                  <><small>ПЕРСОНАЖ СВОБОДЕН</small><h2>Выбери следующий ход</h2><p>Нажми на тайл места. Сначала увидишь предложение, цену и шанс — ничего не запустится само.</p></>
+                )}
+              </aside>
+              <section className="place-ticket">
+                {selectedZone && (
+                  <>
+                    <span className="ticket-number">{String(zones.findIndex((zone) => zone.id === selectedZone.id) + 1).padStart(2, '0')}</span>
+                    <div><small>КАРТОЧКА МЕСТА</small><h2>{selectedZone.name}</h2><p>{selectedZone.note}</p></div>
+                    <button disabled={busy === 'proposal'} onClick={() => void propose(selectedZone.actionKind, `${selectedZone.name}: ${selectedZone.note}`)}>Собрать ход <span>→</span></button>
+                  </>
+                )}
+              </section>
             </div>
-
-            <aside className="current-quest paper-scroll">
-              <div className="scroll-label">СЕЙЧАС В МИРЕ</div>
-              {active ? <><small>{active.status === 'running' ? 'ДЕЙСТВИЕ ИДЁТ' : 'НУЖНО РЕШЕНИЕ'}</small><h2>{active.title}</h2><p>{active.description}</p>{active.status === 'running' ? <div className="big-timer"><strong>{remaining(active, clockNow)}</strong><i><b style={{ width: `${Math.max(4, Math.min(100, ((new Date(active.dueAt ?? 0).getTime() - clockNow) / (active.durationSeconds * 1000)) * 100))}%` }} /></i></div> : <><div className="quest-cost"><span>{active.costCents ? formatMoney(active.costCents) : 'без расходов'}</span><span>−{active.energyCost} энергии</span></div><div className="scroll-decisions"><button disabled={busy === active.id} onClick={() => confirmAction(active.id)}>Начать</button><button disabled={busy === active.id} onClick={() => cancelAction(active.id)}>Отказаться</button></div></>}</> : <><small>СВОБОДНОЕ ВРЕМЯ</small><h2>Куда пойдёт Алекс?</h2><p>Выбери место на диораме. Хост сначала покажет цену и последствия.</p></>}
-            </aside>
-
-            <section className="zone-tray game-plaque">
-              {selectedZone && <><div className="zone-emblem">{selectedZone.glyph}</div><div><small>ВЫБРАНО НА КАРТЕ</small><h2>{selectedZone.name}</h2><p>{selectedZone.note}</p></div><button disabled={busy === 'proposal'} onClick={() => void propose(selectedZone.actionKind, `${selectedZone.name}: ${selectedZone.note}`)}>Подготовить действие <span>→</span></button></>}
-            </section>
-
-            <div className="world-caption"><strong>BUMBARS</strong><span>ЖИЗНЬ ПРОДОЛЖАЕТСЯ</span></div>
           </div>
         )}
 
         {view === 'world' && (
-          <div className="world-screen game-screen-panel">
-            <header className="screen-title"><div><small>КАРТА ПУТЕШЕСТВИЯ</small><h1>Ташкент и дальше</h1><p>Каждая точка — настоящее действие с расходами, временем и последствиями.</p></div><div className="map-compass">N<br/><span>✦</span></div></header>
-            <div className="map-layout">
-              <section className="road-map">
-                <div className="map-paper-grid" /><div className="journey-road" />
-                {districts.map((district, index) => <button key={district.id} className={`district-node ${selectedDistrict?.id === district.id ? 'selected' : ''} ${district.visited ? 'visited' : ''}`} style={{ left: `${district.x}%`, top: `${district.y}%` }} onClick={() => setSelectedDistrictId(district.id)}><span>{district.glyph || index + 1}</span><strong>{district.name}</strong></button>)}
-                <div className="map-doodle doodle-one">⌁</div><div className="map-doodle doodle-two">♧</div><div className="map-doodle doodle-three">△</div>
+          <div className="atlas-screen game-screen-panel">
+            <header className="campaign-title">
+              <div><small>НАСТОЛЬНАЯ КАМПАНИЯ</small><h1>Мир</h1><p>Открывай районы, встречай друзей и прокладывай маршруты с настоящей ценой.</p></div>
+              <div className="atlas-legend"><span><i className="legend-visited" /> посещено</span><span><i className="legend-unknown" /> не разведано</span></div>
+            </header>
+            <div className="atlas-layout">
+              <section className="atlas-board" aria-label="Карта мира">
+                <div className="atlas-fold fold-one" /><div className="atlas-fold fold-two" />
+                <div className="atlas-route route-a" /><div className="atlas-route route-b" /><div className="atlas-route route-c" />
+                <span className="map-forest forest-one">♠ ♠ ♠</span><span className="map-forest forest-two">♠ ♠</span><span className="map-mountains">△ △</span>
+                {districts.map((district, index) => {
+                  const playersHere = state.world.players.filter((player) => player.mapLocationId === district.id);
+                  return (
+                    <button
+                      key={district.id}
+                      className={`atlas-region ${selectedDistrict?.id === district.id ? 'selected' : ''} ${district.visited ? 'visited' : 'unknown'} ${currentDistrictId === district.id ? 'current' : ''}`}
+                      style={{ left: `${district.x}%`, top: `${district.y}%` }}
+                      aria-pressed={selectedDistrict?.id === district.id}
+                      onClick={() => setSelectedDistrictId(district.id)}
+                    >
+                      <span className="region-number">{String(index + 1).padStart(2, '0')}</span>
+                      <span className="region-emblem">{district.visited ? district.glyph : '?'}</span>
+                      <strong>{district.name}</strong>
+                      <small>{currentDistrictId === district.id ? 'Алекс здесь' : district.visited ? 'маршрут известен' : 'туман карты'}</small>
+                      <span className="map-pawns">{playersHere.map((player) => <i key={player.id} className={`map-pawn pawn-${player.color} ${player.isCurrent ? 'current' : ''}`} title={player.name}>{player.name.slice(0, 1)}</i>)}</span>
+                    </button>
+                  );
+                })}
+                <div className="atlas-stamp">BUMBARS<br/><span>ТАШКЕНТ · {dayNumber(state.serverTime)}</span></div>
               </section>
-              <aside className="district-card">
-                {selectedDistrict && <><span className="card-number">{String(districts.findIndex((item) => item.id === selectedDistrict.id) + 1).padStart(2, '0')}</span><small>ВЫБРАННЫЙ МАРШРУТ</small><h2>{selectedDistrict.name}</h2><p>{selectedDistrict.note}</p><dl><div><dt>Расход</dt><dd>{selectedDistrict.travelCostCents ? formatMoney(selectedDistrict.travelCostCents) : 'нет'}</dd></div><div><dt>Время</dt><dd>{selectedDistrict.travelMinutes} мин</dd></div><div><dt>Риск</dt><dd>{selectedDistrict.riskLabel}</dd></div></dl>{selectedDistrict.id === 'district-home' ? <button onClick={() => setView('home')}>Вернуться в квартал</button> : <button disabled={busy === 'proposal'} onClick={() => void propose('travel', `Поехать: ${selectedDistrict.name}. ${selectedDistrict.note}`)}>Проложить путь →</button>}<em>Списание — только после отдельного подтверждения.</em></>}
+              <aside className="route-ticket">
+                {selectedDistrict && (
+                  <>
+                    <span className="card-number">{String(districts.findIndex((item) => item.id === selectedDistrict.id) + 1).padStart(2, '0')}</span>
+                    <small>БИЛЕТ МАРШРУТА</small><h2>{selectedDistrict.name}</h2><p>{selectedDistrict.note}</p>
+                    <dl><div><dt>Дорога</dt><dd>{selectedDistrict.travelMinutes} мин</dd></div><div><dt>Расход</dt><dd>{selectedDistrict.travelCostCents ? formatMoney(selectedDistrict.travelCostCents) : 'бесплатно'}</dd></div><div><dt>Риск</dt><dd>{selectedDistrict.riskLabel}</dd></div></dl>
+                    {selectedDistrict.id === currentDistrictId
+                      ? selectedDistrict.id === 'district-home'
+                        ? <button onClick={() => setView('home')}>Открыть квартал →</button>
+                        : <button disabled>Персонаж уже здесь</button>
+                      : <button disabled={busy === 'proposal'} onClick={() => void propose('travel', `Поехать в ${selectedDistrict.name}. ${selectedDistrict.note}`, selectedDistrict.id)}>Предложить поездку →</button>}
+                    <em>Оплата и запуск — только после подтверждения карточки у Хоста.</em>
+                  </>
+                )}
               </aside>
             </div>
-            <section className="world-feed"><div><small>СОБЫТИЯ МИРА</small>{state.world.events.map((event) => <article key={event.id}><span>✦</span><div><strong>{event.title}</strong><p>{event.summary}</p></div><time>{formatDate(event.happenedAt)}</time></article>)}</div><aside><small>РЫНКИ</small>{state.world.markets.map((market) => <article key={market.id}><strong>{market.name}</strong><span>спрос: {market.demand}</span><span>конкуренция: {market.competition}</span><b>{market.trend >= 0 ? '↑' : '↓'} {Math.abs(market.trend)}%</b></article>)}</aside></section>
+            <section className="campaign-cards">
+              <div><small>КОЛОДА СОБЫТИЙ</small>{state.world.events.map((event, index) => <article className={`event-card event-card-${(index % 3) + 1}`} key={event.id}><span>✦</span><div><strong>{event.title}</strong><p>{event.summary}</p></div><time>{formatDate(event.happenedAt)}</time></article>)}</div>
+              <aside><small>РЫНОЧНЫЕ ЖЕТОНЫ</small>{state.world.markets.map((market) => <article key={market.id}><strong>{market.name}</strong><span>спрос: {market.demand}</span><span>конкуренция: {market.competition}</span><b>{market.trend >= 0 ? '↑' : '↓'} {Math.abs(market.trend)}%</b></article>)}</aside>
+            </section>
           </div>
         )}
 

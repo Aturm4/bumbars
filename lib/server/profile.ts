@@ -15,6 +15,7 @@ import type {
   SkillState,
   StoryThreadState,
   WorldEventState,
+  WorldPlayerState,
   WorldState,
 } from '@/lib/game-types';
 
@@ -22,6 +23,7 @@ export const CHARACTER_ID = 'character-alex';
 
 export async function seedExtendedWorld(db: D1Database, playerId: string, now: string): Promise<void> {
   await db.batch([
+    ...companionIdentitySeeds(db, now),
     db.prepare(`INSERT OR IGNORE INTO characters
       (id, player_id, name, status, morale, stress, confidence, fatigue, biography, created_at)
       VALUES (?, ?, 'Алекс', 'active', 68, 27, 61, 18,
@@ -49,6 +51,7 @@ export async function seedExtendedWorld(db: D1Database, playerId: string, now: s
       (id, journal_entry_id, account_id, side, amount_cents, created_at)
       VALUES ('posting-opening-credit', 'journal-opening', 'account-world-opening', 'credit', 2468000000, ?)`).bind(now),
     ...locationSeeds(db),
+    ...companionLocationSeeds(db, now),
     db.prepare(`INSERT OR IGNORE INTO character_locations
       (character_id, location_id, visited_json, updated_at)
       VALUES (?, 'place-home', '["place-home","district-home"]', ?)`).bind(CHARACTER_ID, now),
@@ -146,23 +149,64 @@ export async function seedExtendedWorld(db: D1Database, playerId: string, now: s
   ]);
 }
 
+function companionIdentitySeeds(db: D1Database, now: string): D1PreparedStatement[] {
+  return [
+    db.prepare(`INSERT OR IGNORE INTO players
+      (id, name, city, role, energy, health, focus, reputation, created_at) VALUES
+      ('demo-timur', 'Тимур', 'Ташкент', 'Операционный менеджер', 76, 81, 58, 44, ?),
+      ('demo-dina', 'Дина', 'Ташкент', 'Исследовательница', 69, 88, 79, 51, ?),
+      ('demo-ruslan', 'Руслан', 'Ташкент', 'Инженер', 84, 77, 63, 35, ?)`)
+      .bind(now, now, now),
+    db.prepare(`INSERT OR IGNORE INTO wallets (player_id, balance_cents, currency) VALUES
+      ('demo-timur', 1820000000, 'UZS'),
+      ('demo-dina', 1340000000, 'UZS'),
+      ('demo-ruslan', 960000000, 'UZS')`),
+    db.prepare(`INSERT OR IGNORE INTO characters
+      (id, player_id, name, status, morale, stress, confidence, fatigue, biography, created_at) VALUES
+      ('character-timur', 'demo-timur', 'Тимур', 'active', 71, 31, 66, 24,
+       'Развивает операционные проекты и ищет устойчивые партнёрства.', ?),
+      ('character-dina', 'demo-dina', 'Дина', 'active', 77, 19, 58, 16,
+       'Собирает знания о рынках и городских возможностях.', ?),
+      ('character-ruslan', 'demo-ruslan', 'Руслан', 'active', 64, 22, 72, 27,
+       'Строит технические решения и предпочитает проверять идеи делом.', ?)`)
+      .bind(now, now, now),
+  ];
+}
+
+function companionLocationSeeds(db: D1Database, now: string): D1PreparedStatement[] {
+  return [
+    db.prepare(`INSERT OR IGNORE INTO character_locations
+      (character_id, location_id, visited_json, updated_at) VALUES
+      ('character-timur', 'place-studio', '["place-studio","district-center"]', ?),
+      ('character-dina', 'place-study', '["place-study","district-old"]', ?),
+      ('character-ruslan', 'place-gym', '["place-gym","district-home"]', ?)`)
+      .bind(now, now, now),
+  ];
+}
 function locationSeeds(db: D1Database): D1PreparedStatement[] {
   const rows = [
     ['city-tashkent', null, 'Ташкент', 'city', 'Общий городской слой мира.', 'Низкий', 0, 0, 50, 50, 'Т', 'travel', 0],
-    ['place-home', 'city-tashkent', 'Дом Алекса', 'place', 'Восстановиться и разобрать планы.', 'Знакомо', 0, 0, 49, 58, '⌂', 'meditation', 1],
-    ['place-studio', 'city-tashkent', 'Nomad Labs', 'place', 'Контракты, команда и проекты.', 'Низкий', 0, 5, 73, 36, 'N', 'work', 2],
-    ['place-gym', 'city-tashkent', 'Спортплощадка', 'place', 'Тренировка и здоровье.', 'Низкий', 18000000, 5, 23, 65, '↟', 'training', 3],
-    ['place-study', 'city-tashkent', 'Чайхана-клуб', 'place', 'Учёба, встречи и знания.', 'Низкий', 0, 5, 27, 34, '✦', 'study', 4],
+    ['place-home', 'district-home', 'Дом Алекса', 'place', 'Восстановиться и разобрать планы.', 'Знакомо', 0, 0, 49, 58, '⌂', 'meditation', 1],
+    ['place-studio', 'district-center', 'Nomad Labs', 'place', 'Контракты, команда и проекты.', 'Низкий', 0, 5, 73, 36, 'N', 'work', 2],
+    ['place-gym', 'district-home', 'Спортплощадка', 'place', 'Тренировка и здоровье.', 'Низкий', 18000000, 5, 23, 65, '↟', 'training', 3],
+    ['place-study', 'district-old', 'Чайхана-клуб', 'place', 'Учёба, встречи и знания.', 'Низкий', 0, 5, 27, 34, '✦', 'study', 4],
     ['district-home', 'city-tashkent', 'Мой квартал', 'district', 'Дом, друзья и привычные маршруты.', 'Знакомо', 0, 0, 14, 71, '⌂', 'travel', 10],
     ['district-center', 'city-tashkent', 'Центр', 'district', 'Работа, встречи и деловые связи.', 'Низкий', 128000000, 5, 32, 52, '2', 'travel', 11],
     ['district-old', 'city-tashkent', 'Старый город', 'district', 'Ремесло, история и новые знакомства.', 'Средний', 128000000, 5, 52, 66, '3', 'travel', 12],
     ['district-sergeli', 'city-tashkent', 'Сергели', 'district', 'Растущий район и новые возможности.', 'Средний', 128000000, 5, 67, 39, '4', 'travel', 13],
     ['district-chimgan', 'city-tashkent', 'Чимган', 'region', 'Дальний маршрут и восстановление.', 'Высокий', 128000000, 5, 85, 20, '5', 'travel', 14],
   ] as const;
-  return rows.map((row) => db.prepare(`INSERT OR IGNORE INTO locations
+  const inserts = rows.map((row) => db.prepare(`INSERT OR IGNORE INTO locations
     (id, parent_id, name, kind, note, risk_label, travel_cost_cents, travel_minutes,
      map_x, map_y, glyph, action_kind, sort_order)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(...row));
+  return [...inserts, db.prepare(`UPDATE locations SET parent_id = CASE id
+    WHEN 'place-home' THEN 'district-home'
+    WHEN 'place-studio' THEN 'district-center'
+    WHEN 'place-gym' THEN 'district-home'
+    WHEN 'place-study' THEN 'district-old'
+    ELSE parent_id END
+    WHERE id IN ('place-home', 'place-studio', 'place-gym', 'place-study')`)];
 }
 
 export async function getExtendedState(db: D1Database, playerId: string): Promise<{
@@ -175,6 +219,7 @@ export async function getExtendedState(db: D1Database, playerId: string): Promis
     character,
     currentLocation,
     locations,
+    worldPlayers,
     skills,
     experience,
     credentials,
@@ -193,6 +238,13 @@ export async function getExtendedState(db: D1Database, playerId: string): Promis
     db.prepare('SELECT * FROM characters WHERE player_id = ?').bind(playerId).first<Record<string, unknown>>(),
     db.prepare('SELECT * FROM character_locations WHERE character_id = ?').bind(CHARACTER_ID).first<Record<string, unknown>>(),
     db.prepare('SELECT * FROM locations ORDER BY sort_order ASC').all<Record<string, unknown>>(),
+    db.prepare(`SELECT p.id player_id, p.name, p.role, c.status, cl.location_id,
+      CASE WHEN l.kind = 'place' THEN l.parent_id ELSE l.id END map_location_id
+      FROM players p
+      JOIN characters c ON c.player_id = p.id
+      JOIN character_locations cl ON cl.character_id = c.id
+      JOIN locations l ON l.id = cl.location_id
+      ORDER BY p.created_at ASC`).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM skills WHERE character_id = ? ORDER BY competence DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM experience_events WHERE character_id = ? ORDER BY occurred_at DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM credentials WHERE character_id = ? ORDER BY status ASC, progress DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
@@ -214,6 +266,12 @@ export async function getExtendedState(db: D1Database, playerId: string): Promis
 
   if (!character || !currentLocation) throw new Error('Расширенное состояние персонажа не создано');
   const visited = new Set(JSON.parse(String(currentLocation.visited_json)) as string[]);
+  const playerColors: Record<string, WorldPlayerState['color']> = {
+    'demo-alex': 'lime',
+    'demo-timur': 'coral',
+    'demo-dina': 'violet',
+    'demo-ruslan': 'amber',
+  };
 
   return {
     character: {
@@ -241,6 +299,16 @@ export async function getExtendedState(db: D1Database, playerId: string): Promis
         glyph: String(row.glyph),
         actionKind: row.action_kind as LocationState['actionKind'],
         visited: visited.has(String(row.id)),
+      })),
+      players: worldPlayers.results.map((row): WorldPlayerState => ({
+        id: String(row.player_id),
+        name: String(row.name),
+        role: String(row.role),
+        color: playerColors[String(row.player_id)] ?? 'amber',
+        locationId: String(row.location_id),
+        mapLocationId: String(row.map_location_id),
+        status: row.status as WorldPlayerState['status'],
+        isCurrent: String(row.player_id) === playerId,
       })),
       events: worldEvents.results.map((row): WorldEventState => ({
         id: String(row.id),

@@ -6,9 +6,9 @@ GET /api/state возвращает канонический GameState: player, 
 
 ## Действия
 
-POST /api/actions принимает только kind и intent. Сервер выбирает название, цену, энергию, длительность, capacity, базовую вероятность и награды.
+POST /api/actions принимает kind, intent и необязательный идентификатор целевой локации для поездки. Клиент не задаёт цену, длительность, вероятность или эффекты: сервер загружает их из каталога и Location.
 
-POST /api/actions/:id/confirm выполняет условный переход и списывает ресурсы один раз. Возможные доменные ошибки: ACTION_NOT_FOUND, ACTION_NOT_CONFIRMABLE, NOT_ENOUGH_ENERGY, NOT_ENOUGH_MONEY и FOREGROUND_CAPACITY_OCCUPIED.
+POST /api/actions/:id/confirm выполняет условный переход и списывает ресурсы один раз. Успешное разрешение поездки меняет CharacterLocation и visited history на сервере. Возможные доменные ошибки: ACTION_NOT_FOUND, ACTION_NOT_CONFIRMABLE, INVALID_TRAVEL_TARGET, NOT_ENOUGH_ENERGY, NOT_ENOUGH_MONEY и FOREGROUND_CAPACITY_OCCUPIED.
 
 POST /api/actions/:id/cancel отменяет только ожидающее подтверждения предложение. Опасные либо платные эффекты до confirm не применяются.
 

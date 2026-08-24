@@ -9,7 +9,7 @@
 - Player — аккаунт человека, Telegram identity, настройки и права.
 - Character — персонаж внутри мира, состояние тела и психологии.
 - Location и CharacterLocation — география, посещённость и текущая позиция.
-- Action и ActionMechanics — жизненный цикл, capacity, вероятность, seed, roll и исход.
+- Action, ActionTarget и ActionMechanics — жизненный цикл, явная цель, capacity, вероятность, seed, roll и исход.
 - Goal, Skill, ExperienceEvent и Credential — доказательный прогресс.
 - Organization, Membership и OwnershipStake — компания, роли, полномочия и доли.
 - Asset, Contract и Employment — имущество и юридико-экономические обязательства.
