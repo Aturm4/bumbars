@@ -197,10 +197,6 @@ function ProfileContent({ state, page, finished }: { state: GameState; page: Pro
   return <div className="wallet-sheet"><section className="wallet-pouch"><small>В КОШЕЛЬКЕ</small><h2>{formatMoney(state.wallet.balanceCents)}</h2><p>Баланс меняется только через сбалансированные серверные проводки.</p><div><span>операций <strong>{state.ledger.length}</strong></span><span>доходов <strong>{state.ledger.filter((entry) => entry.amountCents > 0).length}</strong></span><span>расходов <strong>{state.ledger.filter((entry) => entry.amountCents < 0).length}</strong></span></div></section><section className="receipt-stack"><small>ПОСЛЕДНИЕ ЧЕКИ</small>{state.ledger.map((entry) => <article key={entry.id}><div><strong>{entry.title}</strong><small>{formatDate(entry.createdAt)} · {formatTime(entry.createdAt)}</small></div><b className={entry.amountCents >= 0 ? 'gain' : 'spend'}>{entry.amountCents >= 0 ? '+' : '−'}{formatMoney(Math.abs(entry.amountCents))}</b></article>)}</section></div>;
 }
 
-function characterStatusLabel(status: GameState['character']['status']): string {
-  return status === 'active' ? 'свободен' : status === 'incapacitated' ? 'восстанавливается' : status === 'incarcerated' ? 'недоступен' : 'погиб';
-}
-
 function relationshipLabel(trust: number, resentment: number): string {
   if (resentment >= 40) return 'напряжённые';
   if (trust >= 70) return 'близкие';
@@ -221,70 +217,82 @@ function DossierScreen({ state, tab, busy, onTab, onTravel, onOpenHistory }: {
   const others = state.world.players.filter((player) => !player.isCurrent);
   const hostRelation = state.profile.relationships.find((item) => item.name === 'Хост');
   const hostMessage = state.hostMessages[state.hostMessages.length - 1];
-  const visibleReputations = state.profile.reputations.filter((item) => item.visibility !== 'hidden');
   const currentMapLocationId = state.world.players.find((player) => player.isCurrent)?.mapLocationId;
   const knownPlaces = state.world.locations.filter((location) => location.kind === 'district' || location.kind === 'region');
-
+  const peopleCount = others.length + 1;
 
   return <div className="dossier-screen game-screen-panel">
-    <header className="dossier-heading">
-      <div><small>ЖИВОЙ МИР · ТОЛЬКО ИЗВЕСТНОЕ ПЕРСОНАЖУ</small><h1>Досье</h1><p>Люди, события и связи без всевидящей карты и выдуманных данных.</p></div>
-      <div className="dossier-stamp"><span>{others.length + 1}</span><small>известных<br/>персонажей</small></div>
-    </header>
-    <div className="dossier-tabs" role="tablist" aria-label="Разделы досье">
-      <button role="tab" aria-selected={tab === 'people'} className={tab === 'people' ? 'active' : ''} onClick={() => onTab('people')}>Люди <span>{others.length + 1}</span></button>
-      <button role="tab" aria-selected={tab === 'events'} className={tab === 'events' ? 'active' : ''} onClick={() => onTab('events')}>События <span>{state.world.events.length}</span></button>
-      <button role="tab" aria-selected={tab === 'relations'} className={tab === 'relations' ? 'active' : ''} onClick={() => onTab('relations')}>Связи <span>{state.profile.relationships.length}</span></button>
-    </div>
+    <section className="dossier-folder" aria-label="Досье Алекса">
+      <header className="dossier-file-heading">
+        <span className="dossier-clip" aria-hidden="true" />
+        <div><h1>ДОСЬЕ</h1><p>Люди, связи и то, что тебе известно</p></div>
+        <span className="dossier-round-stamp" aria-hidden="true">Б</span>
+      </header>
 
-    {tab === 'people' && <div className="dossier-board">
-      <section className="dossier-section">
-        <div className="dossier-section-title"><div><small>УЧАСТНИКИ МИРА</small><h2>Кого знает Алекс</h2></div><span>общее знание</span></div>
-        <div className="dossier-people-grid">
-          {others.map((person) => {
+      <div className="dossier-tabs" role="tablist" aria-label="Разделы досье">
+        <button role="tab" aria-selected={tab === 'people'} className={tab === 'people' ? 'active' : ''} onClick={() => onTab('people')}>ЛЮДИ <span>{peopleCount}</span></button>
+        <button role="tab" aria-selected={tab === 'events'} className={tab === 'events' ? 'active' : ''} onClick={() => onTab('events')}>СОБЫТИЯ <span>{state.world.events.length}</span></button>
+        <button role="tab" aria-selected={tab === 'relations'} className={tab === 'relations' ? 'active' : ''} onClick={() => onTab('relations')}>СВЯЗИ <span>{state.profile.relationships.length}</span></button>
+      </div>
+
+      <div className="dossier-file-body">
+        {tab === 'people' && <div className="dossier-card-stack">
+          {others.map((person, index) => {
             const relation = state.profile.relationships.find((item) => item.name === person.name);
-            return <article className={`dossier-person tone-${person.color}`} key={person.id}>
-              <div className="dossier-avatar">{person.name.slice(0, 1)}<i /></div>
-              <div className="dossier-person-copy"><small>{person.role.toUpperCase()}</small><h3>{person.name}</h3><p>{person.biography}</p></div>
-              <div className="dossier-person-state"><b>{characterStatusLabel(person.status)}</b><span>{locations.get(person.locationId) ?? 'место неизвестно'}</span></div>
+            return <article className={`dossier-index-card tone-${person.color}`} key={person.id}>
+              <span className="dossier-side-tab" aria-hidden="true" />
+              <header><span className="dossier-initial">{person.name.slice(0, 1)}</span><div><h2>{person.name}</h2><p>{person.role}</p></div><b>{index === 1 ? 'ОБЩЕЕ' : 'ЛИЧНОЕ'}</b></header>
               <dl>
-                <div><dt>отношение</dt><dd>{relation ? relationshipLabel(relation.trust, relation.resentment) : 'не определено'}</dd></div>
-                <div><dt>последние сведения</dt><dd>{formatDate(person.lastSeenAt)} · {formatTime(person.lastSeenAt)}</dd></div>
-                <div><dt>доверие</dt><dd>{relation ? relation.trust : '—'}</dd></div>
+                <div><dt>отношение:</dt><dd>{relation ? relationshipLabel(relation.trust, relation.resentment) : 'не определено'}</dd></div>
+                <div><dt>последний контакт:</dt><dd>{formatDate(person.lastSeenAt)} · {formatTime(person.lastSeenAt)} · {locations.get(person.locationId) ?? 'место неизвестно'}</dd></div>
+                <div><dt>что известно:</dt><dd>{person.biography}</dd></div>
               </dl>
             </article>;
           })}
-          <article className="dossier-person dossier-host-card">
-            <div className="dossier-avatar">✦<i /></div>
-            <div className="dossier-person-copy"><small>ИИ-ВЕДУЩИЙ</small><h3>Хост</h3><p>Понимает намерение и объясняет исход. Деньги, время, шанс и последствия рассчитывает сервер.</p></div>
-            <div className="dossier-person-state"><b>на связи</b><span>журнал решений</span></div>
+          <article className="dossier-index-card tone-lime dossier-host-card">
+            <span className="dossier-side-tab" aria-hidden="true" />
+            <header><span className="dossier-initial">Х</span><div><h2>Хост</h2><p>ИИ-ведущий</p></div><b>СЛУЖЕБНОЕ</b></header>
             <dl>
-              <div><dt>отношение</dt><dd>{hostRelation ? relationshipLabel(hostRelation.trust, hostRelation.resentment) : 'доверенное'}</dd></div>
-              <div><dt>последний контакт</dt><dd>{hostMessage ? `${formatDate(hostMessage.createdAt)} · ${formatTime(hostMessage.createdAt)}` : 'ещё не было'}</dd></div>
-              <div><dt>доверие</dt><dd>{hostRelation?.trust ?? '—'}</dd></div>
+              <div><dt>отношение:</dt><dd>{hostRelation ? relationshipLabel(hostRelation.trust, hostRelation.resentment) : 'доверенное'}</dd></div>
+              <div><dt>последний контакт:</dt><dd>{hostMessage ? `${formatDate(hostMessage.createdAt)} · ${formatTime(hostMessage.createdAt)}` : 'ещё не было'}</dd></div>
+              <div><dt>что известно:</dt><dd>Объясняет исход, а деньги, время, шанс и последствия считает сервер.</dd></div>
             </dl>
           </article>
-        </div>
-      </section>
-      <aside className="dossier-side-column">
-        <section className="dossier-note"><small>ПОСЛЕДНЕЕ В МИРЕ</small><h2>{state.world.events[0]?.title ?? 'Пока тихо'}</h2><p>{state.world.events[0]?.summary ?? 'Новых известных событий нет.'}</p><button onClick={() => onTab('events')}>Все события →</button></section>
-        <section className="dossier-connections"><small>СОСТОЯНИЕ СВЯЗЕЙ</small>{state.profile.relationships.slice(0, 4).map((relation) => <div key={relation.id}><span>{relation.name.slice(0, 1)}</span><p><strong>{relation.name}</strong><small>{relationshipLabel(relation.trust, relation.resentment)}</small></p><b>{relation.trust}</b></div>)}</section>
-        <button className="dossier-history-button" onClick={onOpenHistory}><span>▤</span><div><strong>Открыть историю Алекса</strong><small>биография и важные события</small></div><b>→</b></button>
-      </aside>
-    </div>}
+        </div>}
 
-    {tab === 'events' && <div className="dossier-events-layout">
-      <section className="dossier-ledger"><div className="dossier-section-title"><div><small>ХРОНИКА МИРА</small><h2>Известные события</h2></div><span>без скрытой информации</span></div>{state.world.events.map((event) => <article key={event.id}><time>{formatDate(event.happenedAt)}<small>{formatTime(event.happenedAt)}</small></time><div><small>{event.scope.toUpperCase()}</small><h3>{event.title}</h3><p>{event.summary}</p></div></article>)}</section>
-      <section className="dossier-locations"><div className="dossier-section-title"><div><small>ИЗВЕСТНЫЕ МЕСТА</small><h2>Маршруты без карты</h2></div><span>сервер рассчитает путь</span></div><div className="dossier-location-grid">{knownPlaces.map((location) => {
-        const isCurrent = location.id === currentMapLocationId;
-        return <article key={location.id}><div><span>{location.glyph}</span><small>{location.kind === 'region' ? 'РЕГИОН' : 'РАЙОН'}</small><h3>{location.name}</h3><p>{location.note}</p></div><dl><div><dt>время</dt><dd>{location.travelMinutes} мин</dd></div><div><dt>стоимость</dt><dd>{formatMoney(location.travelCostCents)}</dd></div><div><dt>риск</dt><dd>{location.riskLabel}</dd></div></dl><button disabled={busy || isCurrent} onClick={() => onTravel(location.id, location.name)}>{isCurrent ? 'Вы уже здесь' : 'Подготовить поездку →'}</button></article>;
-      })}</div></section>
-    </div>}
+        {tab === 'events' && <div className="dossier-card-stack dossier-event-stack">
+          {state.world.events.map((event, index) => <article className={`dossier-index-card tone-${index % 2 ? 'amber' : 'coral'}`} key={event.id}>
+            <span className="dossier-side-tab" aria-hidden="true" />
+            <header><span className="dossier-initial">{index + 1}</span><div><h2>{event.title}</h2><p>{event.scope}</p></div><b>ИЗВЕСТНО</b></header>
+            <dl><div><dt>когда:</dt><dd>{formatDate(event.happenedAt)} · {formatTime(event.happenedAt)}</dd></div><div><dt>что произошло:</dt><dd>{event.summary}</dd></div></dl>
+          </article>)}
+          {knownPlaces.map((location) => {
+            const isCurrent = location.id === currentMapLocationId;
+            return <article className="dossier-index-card tone-violet dossier-route-card" key={location.id}>
+              <span className="dossier-side-tab" aria-hidden="true" />
+              <header><span className="dossier-initial">{location.glyph}</span><div><h2>{location.name}</h2><p>{location.kind === 'region' ? 'известный регион' : 'известный район'}</p></div><b>{isCurrent ? 'ВЫ ЗДЕСЬ' : 'МАРШРУТ'}</b></header>
+              <dl><div><dt>что известно:</dt><dd>{location.note}</dd></div><div><dt>условия:</dt><dd>{location.travelMinutes} мин · {formatMoney(location.travelCostCents)} · риск {location.riskLabel.toLowerCase()}</dd></div></dl>
+              <button disabled={busy || isCurrent} onClick={() => onTravel(location.id, location.name)}>{isCurrent ? 'ТЕКУЩЕЕ МЕСТО' : 'ПОДГОТОВИТЬ ПОЕЗДКУ'}</button>
+            </article>;
+          })}
+        </div>}
 
-    {tab === 'relations' && <div className="dossier-relations-grid">
-      <section className="dossier-ledger"><div className="dossier-section-title"><div><small>СВЯЗИ</small><h2>Отношения Алекса</h2></div><span>четыре независимых шкалы</span></div>{state.profile.relationships.map((relation) => <article className="dossier-relation" key={relation.id}><div className="dossier-avatar mini">{relation.name.slice(0, 1)}</div><div><h3>{relation.name}</h3><small>{relationshipLabel(relation.trust, relation.resentment)}</small><div className="relation-bars"><span>доверие <b style={{ width: `${relation.trust}%` }} />{relation.trust}</span><span>уважение <b style={{ width: `${relation.respect}%` }} />{relation.respect}</span><span>тепло <b style={{ width: `${relation.affection}%` }} />{relation.affection}</span><span className="resentment">обида <b style={{ width: `${relation.resentment}%` }} />{relation.resentment}</span></div></div></article>)}</section>
-      <aside className="dossier-side-column"><section className="dossier-connections"><small>РЕПУТАЦИЯ ПО КРУГАМ</small>{visibleReputations.map((item) => <div key={item.domain}><span>★</span><p><strong>{item.domain}</strong><small>{item.visibility === 'public' ? 'известно миру' : 'личная оценка'}</small></p><b>{item.value}</b></div>)}</section><section className="dossier-note"><small>АКТИВНЫЕ НИТИ</small>{state.profile.storyThreads.map((thread) => <div className="dossier-thread" key={thread.id}><strong>{thread.title}</strong><i><b style={{ width: `${thread.tension}%` }}/></i><small>напряжение {thread.tension}</small></div>)}</section></aside>
-    </div>}
+        {tab === 'relations' && <div className="dossier-card-stack dossier-relations-stack">
+          {state.profile.relationships.map((relation, index) => <article className={`dossier-index-card tone-${['lime', 'coral', 'violet', 'amber'][index % 4]}`} key={relation.id}>
+            <span className="dossier-side-tab" aria-hidden="true" />
+            <header><span className="dossier-initial">{relation.name.slice(0, 1)}</span><div><h2>{relation.name}</h2><p>{relationshipLabel(relation.trust, relation.resentment)}</p></div><b>{relation.trust >= 60 ? 'БЛИЗКИЕ' : 'ЛИЧНОЕ'}</b></header>
+            <div className="dossier-relation-metrics"><span>доверие <b>{relation.trust}</b></span><span>уважение <b>{relation.respect}</b></span><span>тепло <b>{relation.affection}</b></span><span>обида <b>{relation.resentment}</b></span></div>
+          </article>)}
+        </div>}
+      </div>
+
+      <footer className="dossier-connection-slip">
+        <strong>СОСТОЯНИЕ<br/>СВЯЗЕЙ</strong>
+        <div>{state.profile.relationships.slice(0, 2).map((relation, index) => <span key={relation.id}><i className={index ? 'violet' : ''} />{relation.name}: доверие {relation.trust}</span>)}</div>
+        <b aria-hidden="true">↗</b>
+      </footer>
+      <button className="dossier-open-history" onClick={onOpenHistory}>ОТКРЫТЬ ИСТОРИЮ</button>
+    </section>
   </div>;
 }
 export default function GameApp() {
@@ -434,7 +442,7 @@ export default function GameApp() {
             <header className="screen-title"><div><small>ЛИЧНЫЙ ПУТЕВОЙ ЖУРНАЛ</small><h1>Сегодняшний путь</h1><p>Алекс может быть занят, но ты всегда можешь планировать следующий ход.</p></div><button className="add-routine" onClick={() => setShowRoutineForm((value) => !value)}>+ Новый ритуал</button></header>
             {showRoutineForm && <form className="ritual-maker" onSubmit={submitRoutine}><div><label htmlFor="ritual-title">Ритуал</label><input id="ritual-title" name="title" required minLength={2} maxLength={60} placeholder="Вечерняя прогулка"/></div><div><label htmlFor="ritual-schedule">Когда</label><input id="ritual-schedule" name="schedule" required minLength={3} maxLength={80} placeholder="Каждый день · 20:00"/></div><div><label htmlFor="ritual-duration">Минут</label><input id="ritual-duration" name="duration" type="number" required min={5} max={180} defaultValue={30}/></div><button disabled={busy === 'routine-create'}>Добавить на поле</button></form>}
             <div className="open-journal">
-              <section className="journal-page today-page"><div className="page-tab">ДЕЙСТВИЯ</div><div className="page-heading"><span>{running.length + awaiting.length}</span><h2>В дороге</h2></div><div className="path-line" />{[...running, ...awaiting].length ? [...running, ...awaiting].map((action, index) => <div className="path-stop" key={action.id}><span>{index + 1}</span><GameActionCard action={action} now={clockNow} busy={busy} onConfirm={confirmAction} onCancel={cancelAction} compact /></div>) : <div className="game-empty"><strong>Путь свободен</strong><p>Выбери место в квартале или поговори с Хостом.</p></div>}<div className="page-heading resolved-heading"><span>{finished.length}</span><h2>Следы опыта</h2></div>{finished.slice(0, 3).map((action) => <GameActionCard key={action.id} action={action} now={clockNow} busy={busy} onConfirm={confirmAction} onCancel={cancelAction} compact />)}</section>
+              <section className="journal-page today-page"><div className="page-tab">ДЕЙСТВИЯ</div><div className="page-heading"><span>{running.length + awaiting.length}</span><h2>В дороге</h2></div><div className="path-line" />{[...running, ...awaiting].length ? [...running, ...awaiting].map((action, index) => <div className="path-stop" key={action.id}><span>{index + 1}</span><GameActionCard action={action} now={clockNow} busy={busy} onConfirm={confirmAction} onCancel={cancelAction} compact /></div>) : <div className="game-empty"><strong>Путь свободен</strong><p>Выбери маршрут в досье или поговори с Хостом.</p></div>}<div className="page-heading resolved-heading"><span>{finished.length}</span><h2>Следы опыта</h2></div>{finished.slice(0, 3).map((action) => <GameActionCard key={action.id} action={action} now={clockNow} busy={busy} onConfirm={confirmAction} onCancel={cancelAction} compact />)}</section>
               <section className="journal-page routine-page"><div className="page-tab">РИТУАЛЫ</div><div className="page-heading"><span>{state.routines.length}</span><h2>Повторяющийся маршрут</h2></div><div className="routine-stack">{state.routines.map((routine) => <RoutineToken key={routine.id} routine={routine} busy={busy} confirming={confirmRoutine === routine.id} onMutate={mutateRoutine} onConfirmCancel={setConfirmRoutine}/>)}</div></section>
             </div>
           </div>
