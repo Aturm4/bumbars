@@ -3,11 +3,13 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import type { ActionKind, ApiError, GameAction, GameState, RoutineState } from '@/lib/game-types';
 
-type View = 'host' | 'plan' | 'profile';
+type View = 'host' | 'dossier' | 'plan' | 'profile';
+type DossierTab = 'people' | 'events' | 'relations';
 type ProfilePage = 'character' | 'career' | 'skills' | 'assets' | 'relations' | 'biography' | 'finance';
 
 const NAV: Array<{ id: View; label: string; glyph: string }> = [
   { id: 'host', label: 'Хост', glyph: '✦' },
+  { id: 'dossier', label: 'Досье', glyph: '▰' },
   { id: 'plan', label: 'Путь', glyph: '▦' },
   { id: 'profile', label: 'Алекс', glyph: '●' },
 ];
@@ -188,9 +190,100 @@ function ProfileContent({ state, page, finished }: { state: GameState; page: Pro
   return <div className="wallet-sheet"><section className="wallet-pouch"><small>В КОШЕЛЬКЕ</small><h2>{formatMoney(state.wallet.balanceCents)}</h2><p>Баланс меняется только через сбалансированные серверные проводки.</p><div><span>операций <strong>{state.ledger.length}</strong></span><span>доходов <strong>{state.ledger.filter((entry) => entry.amountCents > 0).length}</strong></span><span>расходов <strong>{state.ledger.filter((entry) => entry.amountCents < 0).length}</strong></span></div></section><section className="receipt-stack"><small>ПОСЛЕДНИЕ ЧЕКИ</small>{state.ledger.map((entry) => <article key={entry.id}><div><strong>{entry.title}</strong><small>{formatDate(entry.createdAt)} · {formatTime(entry.createdAt)}</small></div><b className={entry.amountCents >= 0 ? 'gain' : 'spend'}>{entry.amountCents >= 0 ? '+' : '−'}{formatMoney(Math.abs(entry.amountCents))}</b></article>)}</section></div>;
 }
 
+function characterStatusLabel(status: GameState['character']['status']): string {
+  return status === 'active' ? 'свободен' : status === 'incapacitated' ? 'восстанавливается' : status === 'incarcerated' ? 'недоступен' : 'погиб';
+}
+
+function relationshipLabel(trust: number, resentment: number): string {
+  if (resentment >= 40) return 'напряжённые';
+  if (trust >= 70) return 'близкие';
+  if (trust >= 50) return 'надёжные';
+  if (trust >= 30) return 'знакомые';
+  return 'неопределённые';
+}
+
+function DossierScreen({ state, tab, busy, onTab, onTravel, onOpenHistory }: {
+  state: GameState;
+  tab: DossierTab;
+  busy: boolean;
+  onTab: (tab: DossierTab) => void;
+  onTravel: (locationId: string, locationName: string) => void;
+  onOpenHistory: () => void;
+}) {
+  const locations = new Map(state.world.locations.map((location) => [location.id, location.name]));
+  const others = state.world.players.filter((player) => !player.isCurrent);
+  const hostRelation = state.profile.relationships.find((item) => item.name === 'Хост');
+  const hostMessage = state.hostMessages[state.hostMessages.length - 1];
+  const visibleReputations = state.profile.reputations.filter((item) => item.visibility !== 'hidden');
+  const currentMapLocationId = state.world.players.find((player) => player.isCurrent)?.mapLocationId;
+  const knownPlaces = state.world.locations.filter((location) => location.kind === 'district' || location.kind === 'region');
+
+
+  return <div className="dossier-screen game-screen-panel">
+    <header className="dossier-heading">
+      <div><small>ЖИВОЙ МИР · ТОЛЬКО ИЗВЕСТНОЕ ПЕРСОНАЖУ</small><h1>Досье</h1><p>Люди, события и связи без всевидящей карты и выдуманных данных.</p></div>
+      <div className="dossier-stamp"><span>{others.length + 1}</span><small>известных<br/>персонажей</small></div>
+    </header>
+    <div className="dossier-tabs" role="tablist" aria-label="Разделы досье">
+      <button role="tab" aria-selected={tab === 'people'} className={tab === 'people' ? 'active' : ''} onClick={() => onTab('people')}>Люди <span>{others.length + 1}</span></button>
+      <button role="tab" aria-selected={tab === 'events'} className={tab === 'events' ? 'active' : ''} onClick={() => onTab('events')}>События <span>{state.world.events.length}</span></button>
+      <button role="tab" aria-selected={tab === 'relations'} className={tab === 'relations' ? 'active' : ''} onClick={() => onTab('relations')}>Связи <span>{state.profile.relationships.length}</span></button>
+    </div>
+
+    {tab === 'people' && <div className="dossier-board">
+      <section className="dossier-section">
+        <div className="dossier-section-title"><div><small>УЧАСТНИКИ МИРА</small><h2>Кого знает Алекс</h2></div><span>общее знание</span></div>
+        <div className="dossier-people-grid">
+          {others.map((person) => {
+            const relation = state.profile.relationships.find((item) => item.name === person.name);
+            return <article className={`dossier-person tone-${person.color}`} key={person.id}>
+              <div className="dossier-avatar">{person.name.slice(0, 1)}<i /></div>
+              <div className="dossier-person-copy"><small>{person.role.toUpperCase()}</small><h3>{person.name}</h3><p>{person.biography}</p></div>
+              <div className="dossier-person-state"><b>{characterStatusLabel(person.status)}</b><span>{locations.get(person.locationId) ?? 'место неизвестно'}</span></div>
+              <dl>
+                <div><dt>отношение</dt><dd>{relation ? relationshipLabel(relation.trust, relation.resentment) : 'не определено'}</dd></div>
+                <div><dt>последние сведения</dt><dd>{formatDate(person.lastSeenAt)} · {formatTime(person.lastSeenAt)}</dd></div>
+                <div><dt>доверие</dt><dd>{relation ? relation.trust : '—'}</dd></div>
+              </dl>
+            </article>;
+          })}
+          <article className="dossier-person dossier-host-card">
+            <div className="dossier-avatar">✦<i /></div>
+            <div className="dossier-person-copy"><small>ИИ-ВЕДУЩИЙ</small><h3>Хост</h3><p>Понимает намерение и объясняет исход. Деньги, время, шанс и последствия рассчитывает сервер.</p></div>
+            <div className="dossier-person-state"><b>на связи</b><span>журнал решений</span></div>
+            <dl>
+              <div><dt>отношение</dt><dd>{hostRelation ? relationshipLabel(hostRelation.trust, hostRelation.resentment) : 'доверенное'}</dd></div>
+              <div><dt>последний контакт</dt><dd>{hostMessage ? `${formatDate(hostMessage.createdAt)} · ${formatTime(hostMessage.createdAt)}` : 'ещё не было'}</dd></div>
+              <div><dt>доверие</dt><dd>{hostRelation?.trust ?? '—'}</dd></div>
+            </dl>
+          </article>
+        </div>
+      </section>
+      <aside className="dossier-side-column">
+        <section className="dossier-note"><small>ПОСЛЕДНЕЕ В МИРЕ</small><h2>{state.world.events[0]?.title ?? 'Пока тихо'}</h2><p>{state.world.events[0]?.summary ?? 'Новых известных событий нет.'}</p><button onClick={() => onTab('events')}>Все события →</button></section>
+        <section className="dossier-connections"><small>СОСТОЯНИЕ СВЯЗЕЙ</small>{state.profile.relationships.slice(0, 4).map((relation) => <div key={relation.id}><span>{relation.name.slice(0, 1)}</span><p><strong>{relation.name}</strong><small>{relationshipLabel(relation.trust, relation.resentment)}</small></p><b>{relation.trust}</b></div>)}</section>
+        <button className="dossier-history-button" onClick={onOpenHistory}><span>▤</span><div><strong>Открыть историю Алекса</strong><small>биография и важные события</small></div><b>→</b></button>
+      </aside>
+    </div>}
+
+    {tab === 'events' && <div className="dossier-events-layout">
+      <section className="dossier-ledger"><div className="dossier-section-title"><div><small>ХРОНИКА МИРА</small><h2>Известные события</h2></div><span>без скрытой информации</span></div>{state.world.events.map((event) => <article key={event.id}><time>{formatDate(event.happenedAt)}<small>{formatTime(event.happenedAt)}</small></time><div><small>{event.scope.toUpperCase()}</small><h3>{event.title}</h3><p>{event.summary}</p></div></article>)}</section>
+      <section className="dossier-locations"><div className="dossier-section-title"><div><small>ИЗВЕСТНЫЕ МЕСТА</small><h2>Маршруты без карты</h2></div><span>сервер рассчитает путь</span></div><div className="dossier-location-grid">{knownPlaces.map((location) => {
+        const isCurrent = location.id === currentMapLocationId;
+        return <article key={location.id}><div><span>{location.glyph}</span><small>{location.kind === 'region' ? 'РЕГИОН' : 'РАЙОН'}</small><h3>{location.name}</h3><p>{location.note}</p></div><dl><div><dt>время</dt><dd>{location.travelMinutes} мин</dd></div><div><dt>стоимость</dt><dd>{formatMoney(location.travelCostCents)}</dd></div><div><dt>риск</dt><dd>{location.riskLabel}</dd></div></dl><button disabled={busy || isCurrent} onClick={() => onTravel(location.id, location.name)}>{isCurrent ? 'Вы уже здесь' : 'Подготовить поездку →'}</button></article>;
+      })}</div></section>
+    </div>}
+
+    {tab === 'relations' && <div className="dossier-relations-grid">
+      <section className="dossier-ledger"><div className="dossier-section-title"><div><small>СВЯЗИ</small><h2>Отношения Алекса</h2></div><span>четыре независимых шкалы</span></div>{state.profile.relationships.map((relation) => <article className="dossier-relation" key={relation.id}><div className="dossier-avatar mini">{relation.name.slice(0, 1)}</div><div><h3>{relation.name}</h3><small>{relationshipLabel(relation.trust, relation.resentment)}</small><div className="relation-bars"><span>доверие <b style={{ width: `${relation.trust}%` }} />{relation.trust}</span><span>уважение <b style={{ width: `${relation.respect}%` }} />{relation.respect}</span><span>тепло <b style={{ width: `${relation.affection}%` }} />{relation.affection}</span><span className="resentment">обида <b style={{ width: `${relation.resentment}%` }} />{relation.resentment}</span></div></div></article>)}</section>
+      <aside className="dossier-side-column"><section className="dossier-connections"><small>РЕПУТАЦИЯ ПО КРУГАМ</small>{visibleReputations.map((item) => <div key={item.domain}><span>★</span><p><strong>{item.domain}</strong><small>{item.visibility === 'public' ? 'известно миру' : 'личная оценка'}</small></p><b>{item.value}</b></div>)}</section><section className="dossier-note"><small>АКТИВНЫЕ НИТИ</small>{state.profile.storyThreads.map((thread) => <div className="dossier-thread" key={thread.id}><strong>{thread.title}</strong><i><b style={{ width: `${thread.tension}%` }}/></i><small>напряжение {thread.tension}</small></div>)}</section></aside>
+    </div>}
+  </div>;
+}
 export default function GameApp() {
   const [state, setState] = useState<GameState | null>(null);
-  const [view, setView] = useState<View>('host');
+  const [view, setView] = useState<View>('dossier');
+  const [dossierTab, setDossierTab] = useState<DossierTab>('people');
   const [profilePage, setProfilePage] = useState<ProfilePage>('character');
   const [hostIntent, setHostIntent] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -339,6 +432,8 @@ export default function GameApp() {
             </div>
           </div>
         )}
+
+        {view === 'dossier' && <DossierScreen state={state} tab={dossierTab} busy={busy === 'proposal'} onTab={setDossierTab} onTravel={(locationId, locationName) => void propose('travel', `поехать в ${locationName}`, locationId)} onOpenHistory={() => { setProfilePage('biography'); setView('profile'); }} />}
 
         {view === 'profile' && (
           <div className="profile-screen game-screen-panel">

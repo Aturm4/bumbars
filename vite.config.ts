@@ -15,6 +15,12 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 const localBindingConfig = {
   main: 'vinext/server/app-router-entry',
   compatibility_flags: ['nodejs_compat'],
+  vars: {
+    GOOGLE_API_KEY: process.env.GOOGLE_API_KEY ?? '',
+    GOOGLE_GENAI_USE_ENTERPRISE: process.env.GOOGLE_GENAI_USE_ENTERPRISE ?? 'False',
+    GOOGLE_GENAI_MODEL: process.env.GOOGLE_GENAI_MODEL ?? 'gemini-3.5-flash',
+    GOOGLE_GENAI_API_VERSION: process.env.GOOGLE_GENAI_API_VERSION ?? 'v1',
+  },
   d1_databases: d1
     ? [
         {

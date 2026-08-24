@@ -11,11 +11,10 @@ import type {
 } from '@/lib/game-types';
 import { getExtendedState, seedExtendedWorld } from '@/lib/server/profile';
 import { routeSkills } from '@/lib/ai/skill-router';
-import { DeterministicDevelopmentProvider } from '@/lib/ai/provider';
+import { createAiProvider } from '@/lib/ai/provider';
 import { ensureSchema } from '@/lib/server/db';
 
 const PLAYER_ID = 'demo-alex';
-const DEVELOPMENT_AI = new DeterministicDevelopmentProvider();
 
 type ActionDefinition = {
   title: string;
@@ -493,7 +492,24 @@ export async function proposeAction(input: {
   const explicitKind = typeof input.kind === 'string' && input.kind in ACTION_CATALOG
     ? (input.kind as ActionKind)
     : null;
-  const interpreted = !explicitKind && intent ? await DEVELOPMENT_AI.interpretIntent(intent) : null;
+  let interpreted = null;
+  let providerName = 'deterministic-server-catalog';
+  if (!explicitKind && intent) {
+    const aiProvider = createAiProvider();
+    providerName = aiProvider.name;
+    try {
+      interpreted = await aiProvider.interpretIntent(intent);
+    } catch (reason) {
+      const failure = reason as { status?: unknown; code?: unknown };
+      console.error('AI provider request failed', {
+        provider: aiProvider.name,
+        errorType: reason instanceof Error ? reason.name : 'unknown',
+        status: typeof failure.status === 'number' ? failure.status : null,
+        code: typeof failure.code === 'number' || typeof failure.code === 'string' ? failure.code : null,
+      });
+      throw new DomainError('Хост временно не получил ответ от ИИ. Попробуйте ещё раз.', 'AI_PROVIDER_UNAVAILABLE', 502);
+    }
+  }
   const kind = explicitKind ?? interpreted?.kind ?? null;
   if (!kind) {
     throw new DomainError(
@@ -573,7 +589,7 @@ export async function proposeAction(input: {
     db.prepare(`INSERT INTO agent_runs
       (id, player_id, role, prompt_version, provider, skill_keys, status, created_at)
       VALUES (?, ?, 'referee', 'referee.v1', ?, ?, 'validated', ?)`)
-      .bind(uid('agent'), PLAYER_ID, DEVELOPMENT_AI.name, JSON.stringify(routedSkills), now),
+      .bind(uid('agent'), PLAYER_ID, providerName, JSON.stringify(routedSkills), now),
     db.prepare(`INSERT INTO chat_messages
       (id, player_id, role, source, body, created_at) VALUES (?, ?, 'player', 'WEB', ?, ?)`)
       .bind(uid('chat'), PLAYER_ID, description, now),

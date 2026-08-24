@@ -218,9 +218,11 @@ export interface WorldPlayerState {
   id: string;
   name: string;
   role: string;
+  biography: string;
   color: 'lime' | 'coral' | 'violet' | 'amber';
   locationId: string;
   mapLocationId: string;
+  lastSeenAt: string;
   status: CharacterState['status'];
   isCurrent: boolean;
 }

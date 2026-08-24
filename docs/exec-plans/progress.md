@@ -116,3 +116,22 @@ Frontend simulation state удалён из пользовательского �
 - `npm run lint`: успешно;
 - `npm run build`: успешно;
 - остаточных ссылок на маршруты и CSS-классы старых экранов в `GameApp.tsx` и `game.css` нет.
+
+## 24 августа 2026 — «Досье» и Gemini Agent Platform
+
+- пользователь утвердил концепт B «Досье»; он реализован как четвёртый основной раздел вместо картографического мира;
+- вкладки «Люди», «События» и «Связи» читают только канонические `WorldState` и `ProfileState`;
+- участники получают биографию, последнее серверное положение и время последних сведений из D1 read-model;
+- текстовые маршруты к районам создают `ActionProposal`; поездка не начинается без отдельного подтверждения;
+- свободный русский текст подключён к Gemini Enterprise Agent Platform express mode через `aiplatform.googleapis.com/v1` и `generateContent?key=...`;
+- модель `gemini-3.5-flash` возвращает schema-bound классификацию; сервер отбрасывает неизвестные значения;
+- API key читается из secret binding `GOOGLE_API_KEY`; в исходниках, `.env.example`, логах и Git его нет;
+- Gemini не задаёт цену, длительность, вероятность, RNG или эффекты: их по-прежнему вычисляет deterministic backend.
+
+### Проверки
+
+- прямой Agent Platform smoke: модель и ключ отвечают;
+- application smoke: фраза про кардио классифицирована как `training`, карточка отменена без нового списания;
+- `npm run test:scenarios`: 10/10 сценариев пройдено;
+- `npm run typecheck`, `npm run lint`, `npm run build`: успешно;
+- автоматический browser-control остаётся заблокирован системным Windows ACL; HTTP/API и production build проверены отдельно.

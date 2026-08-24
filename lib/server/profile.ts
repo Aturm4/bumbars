@@ -238,7 +238,8 @@ export async function getExtendedState(db: D1Database, playerId: string): Promis
     db.prepare('SELECT * FROM characters WHERE player_id = ?').bind(playerId).first<Record<string, unknown>>(),
     db.prepare('SELECT * FROM character_locations WHERE character_id = ?').bind(CHARACTER_ID).first<Record<string, unknown>>(),
     db.prepare('SELECT * FROM locations ORDER BY sort_order ASC').all<Record<string, unknown>>(),
-    db.prepare(`SELECT p.id player_id, p.name, p.role, c.status, cl.location_id,
+    db.prepare(`SELECT p.id player_id, p.name, p.role, c.status, c.biography,
+      cl.location_id, cl.updated_at last_seen_at,
       CASE WHEN l.kind = 'place' THEN l.parent_id ELSE l.id END map_location_id
       FROM players p
       JOIN characters c ON c.player_id = p.id
@@ -304,9 +305,11 @@ export async function getExtendedState(db: D1Database, playerId: string): Promis
         id: String(row.player_id),
         name: String(row.name),
         role: String(row.role),
+        biography: String(row.biography),
         color: playerColors[String(row.player_id)] ?? 'amber',
         locationId: String(row.location_id),
         mapLocationId: String(row.map_location_id),
+        lastSeenAt: String(row.last_seen_at),
         status: row.status as WorldPlayerState['status'],
         isCurrent: String(row.player_id) === playerId,
       })),
