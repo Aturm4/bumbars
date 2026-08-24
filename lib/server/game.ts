@@ -12,6 +12,7 @@ import type {
 import { getExtendedState, seedExtendedWorld } from '@/lib/server/profile';
 import { routeSkills } from '@/lib/ai/skill-router';
 import { createAiProvider } from '@/lib/ai/provider';
+import { evaluateIntentSafety } from '@/lib/server/safety';
 import { ensureSchema } from '@/lib/server/db';
 
 const PLAYER_ID = 'demo-alex';
@@ -487,6 +488,14 @@ export async function proposeAction(input: {
   const intent = typeof input.intent === 'string' ? input.intent.trim() : '';
   if (intent.length > 280) {
     throw new DomainError('Сформулируйте намерение короче 280 символов', 'INTENT_TOO_LONG');
+  }
+  const safety = evaluateIntentSafety(intent);
+  if (!safety.allowed) {
+    throw new DomainError(
+      'Хост не создаёт действия с сексуализированным насилием, принуждением или тяжёлым вредом другим людям.',
+      'UNSAFE_INTENT',
+      422,
+    );
   }
 
   const explicitKind = typeof input.kind === 'string' && input.kind in ACTION_CATALOG

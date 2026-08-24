@@ -11,7 +11,8 @@
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "typecheck": "tsc --noEmit",
-    "test:scenarios": "node scripts/scenario-smoke.mjs"
+    "test:scenarios": "node scripts/scenario-smoke.mjs",
+    "test:safety": "node scripts/safety-smoke.mjs"
   },
   "dependencies": {
     "next": "16.2.6",

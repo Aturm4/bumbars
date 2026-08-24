@@ -7,6 +7,7 @@ GET /api/state возвращает канонический GameState: player, 
 ## Действия
 
 POST /api/actions принимает kind, intent и необязательный идентификатор целевой локации для поездки. Клиент не задаёт цену, длительность, вероятность или эффекты: сервер загружает их из каталога и Location.
+Сексуализированное насилие, принуждение и тяжёлый вред отклоняются до вызова ИИ со статусом 422 и кодом `UNSAFE_INTENT`; ActionProposal и проводки не создаются.
 
 POST /api/actions/:id/confirm выполняет условный переход и списывает ресурсы один раз. Успешное разрешение поездки меняет CharacterLocation и visited history на сервере. Возможные доменные ошибки: ACTION_NOT_FOUND, ACTION_NOT_CONFIRMABLE, INVALID_TRAVEL_TARGET, NOT_ENOUGH_ENERGY, NOT_ENOUGH_MONEY и FOREGROUND_CAPACITY_OCCUPIED.
 
