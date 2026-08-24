@@ -35,3 +35,4 @@
 28. Внешний AI подключён только как `AiProvider` для интерпретации намерений и будущего narrator-слоя. Его вывод проходит enum/schema validation и не имеет доступа к D1 или механикам.
 29. Для Gemini Enterprise Agent Platform express mode выбран официальный REST v1 с `key` в query: worker-сборка SDK отправляла credential заголовком и получила 403, а REST точно соответствует выданному ключу и официальному контракту.
 30. `GOOGLE_API_KEY` хранится как Sites secret/runtime binding. В репозитории существует только пустой `.env.example`; диагностические логи не содержат URL, credential или тело ответа провайдера.
+31. Офлайн application shell отключён: service worker не имеет права перехватывать SIWC-маршруты, динамические страницы и API приватного persistent-приложения. Миграционный worker удаляет старые `bumbars-shell-*` кэши и саморегистрируется на удаление.

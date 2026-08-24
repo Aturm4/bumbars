@@ -45,6 +45,13 @@ function remaining(action: GameAction | undefined, now: number): string {
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+function readableRequestError(reason: unknown, fallback: string): string {
+  if (reason instanceof TypeError && /fetch|network|load failed/i.test(reason.message)) {
+    return 'Не удалось связаться с сервером. Проверь соединение и повтори.';
+  }
+  return reason instanceof Error && reason.message ? reason.message : fallback;
+}
+
 function statusText(action: GameAction): string {
   return {
     awaiting_confirmation: 'Нужно решение',
@@ -302,7 +309,7 @@ export default function GameApp() {
       setState(data as GameState);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Мир временно недоступен');
+      setError(readableRequestError(reason, 'Мир временно недоступен'));
     } finally {
       if (!quiet) setBusy(null);
     }
@@ -336,7 +343,7 @@ export default function GameApp() {
       setNotice(success);
       return true;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Команда не выполнена');
+      setError(readableRequestError(reason, 'Команда не выполнена'));
       return false;
     } finally {
       setBusy(null);

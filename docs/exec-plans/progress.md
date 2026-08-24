@@ -135,3 +135,19 @@ Frontend simulation state удалён из пользовательского �
 - `npm run test:scenarios`: 10/10 сценариев пройдено;
 - `npm run typecheck`, `npm run lint`, `npm run build`: успешно;
 - автоматический browser-control остаётся заблокирован системным Windows ACL; HTTP/API и production build проверены отдельно.
+
+## 24 августа 2026 — исправление входа ChatGPT
+
+- устранён конфликт старого PWA service worker со служебными SIWC-маршрутами `/signin-with-chatgpt`, `/signout-with-chatgpt` и `/callback`;
+- offline shell больше не перехватывает навигацию и не подменяет страницу входа закэшированным игровым экраном;
+- добавлена миграция для уже открывавших сайт пользователей: старые `bumbars-shell-*` кэши удаляются, worker снимается с регистрации, открытая вкладка перезагружается;
+- production-корень помечен динамическим и требует подтверждённого ChatGPT-пользователя через dispatch-owned SIWC;
+- системные сетевые ошибки теперь показываются пользователю на русском языке;
+- локальный резервный классификатор понимает «кардио», «выносливость» и «упражнение».
+
+### Проверки
+
+- production build: успешно, корень отмечен как dynamic;
+- без identity корень отвечает `307` на `/signin-with-chatgpt?return_to=%2F`;
+- retirement worker доступен, не содержит fetch-handler и вызывает `registration.unregister()`;
+- `npm run test:scenarios`: 10/10 сценариев пройдено.

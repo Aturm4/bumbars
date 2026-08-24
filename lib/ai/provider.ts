@@ -19,7 +19,12 @@ export class DeterministicDevelopmentProvider implements AiProvider {
 
   async interpretIntent(input: string): Promise<InterpretedIntent> {
     const normalized = input.toLocaleLowerCase('ru-RU');
-    const kind: ActionKind | null = normalized.includes('трен') || normalized.includes('зал') || normalized.includes('спорт')
+    const kind: ActionKind | null = normalized.includes('трен') ||
+      normalized.includes('зал') ||
+      normalized.includes('спорт') ||
+      normalized.includes('кардио') ||
+      normalized.includes('вынослив') ||
+      normalized.includes('упражнен')
       ? 'training'
       : normalized.includes('уч') || normalized.includes('курс') || normalized.includes('книг')
         ? 'study'
