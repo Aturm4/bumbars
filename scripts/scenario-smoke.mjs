@@ -11,7 +11,7 @@ async function request(path, init = {}) {
     headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(`${path}: ${body.code || response.status}`);
+  if (!response.ok) throw new Error(`${path}: ${body.code || response.status} — ${body.error || 'ошибка'}`);
   return body;
 }
 
@@ -24,74 +24,132 @@ async function run(number, title, check) {
   }
 }
 
-async function createAndCancel(payload, expectedKind) {
+async function sendHost(message) {
   const before = await request('/api/state');
-  const knownIds = new Set(before.actions.map((action) => action.id));
-  const proposed = await request('/api/actions', { method: 'POST', body: JSON.stringify(payload) });
-  const action = proposed.actions.find((item) => !knownIds.has(item.id));
-  assert(action?.status === 'awaiting_confirmation', 'нет нового подтверждаемого предложения');
-  assert(action.kind === expectedKind, `ожидался kind=${expectedKind}, получен ${action.kind}`);
-  assert(proposed.wallet.balanceCents === before.wallet.balanceCents, 'баланс изменился до подтверждения');
-  const cancelled = await request(`/api/actions/${action.id}/cancel`, { method: 'POST', body: '{}' });
-  assert(cancelled.actions.find((item) => item.id === action.id)?.status === 'cancelled', 'предложение не отменилось');
-  assert(cancelled.wallet.balanceCents === before.wallet.balanceCents, 'отмена изменила баланс');
+  const known = new Set(before.actions.map((action) => action.id));
+  const state = await request('/api/host/messages', { method: 'POST', body: JSON.stringify({ message }) });
+  return { before, state, action: state.actions.find((item) => !known.has(item.id)) ?? null };
+}
+
+async function cancelIfNeeded(action) {
+  if (action?.status === 'awaiting_confirmation') {
+    await request(`/api/actions/${action.id}/cancel`, { method: 'POST', body: '{}' });
+  }
 }
 
 const initial = await request('/api/state');
 
-await run(1, 'Свободное намерение через Gemini → тренировка', async () => {
-  await createAndCancel({ intent: 'хочу сделать кардио и укрепить выносливость' }, 'training');
+await run(1, 'Русский read-model, USD и семь состояний', async () => {
+  assert(initial.wallet.currency === 'USD', `валюта ${initial.wallet.currency}`);
+  assert(initial.player.city === 'Ташкент', 'город не локализован');
+  for (const key of ['energy', 'health', 'strength', 'intelligence']) assert(Number.isFinite(initial.player[key]), `нет player.${key}`);
+  for (const key of ['morale', 'confidence', 'fatigue']) assert(Number.isFinite(initial.character[key]), `нет character.${key}`);
+  assert(!('focus' in initial.player) && !('stress' in initial.character), 'устаревшие focus/stress попали в read-model');
 });
-await run(2, 'Учебный спринт', async () => {
-  await createAndCancel({ kind: 'study', intent: 'разобрать один учебный модуль' }, 'study');
+
+await run(2, 'Свободный вопрос остаётся разговором', async () => {
+  const { before, state, action } = await sendHost('Что сейчас известно о Тимуре?');
+  assert(!action, 'вопрос превратился в действие');
+  const tail = state.hostMessages.slice(-2);
+  assert(tail[0]?.role === 'player' && tail[1]?.role === 'host', 'нарушен порядок реплик игрок → Хост');
+  assert(tail[1].body.length > 20, 'Хост не ответил содержательно');
+  assert(state.wallet.balanceCents === before.wallet.balanceCents, 'разговор изменил деньги');
 });
-await run(3, 'Рабочий контракт', async () => {
-  await createAndCancel({ kind: 'work', intent: 'взять небольшую задачу для студии' }, 'work');
+
+await run(3, 'Тренировка через Хоста: $18, эффекты и progress', async () => {
+  const { before, state, action } = await sendHost('Давай начнём силовую тренировку.');
+  try {
+    assert(action?.kind === 'training', `получен kind=${action?.kind || 'нет действия'}`);
+    assert(action.status === 'awaiting_confirmation', 'действие запущено без подтверждения');
+    assert(action.costCents === 1800, `цена тренировки ${action.costCents}`);
+    assert(action.resolutionMode === 'progress', 'тренировка использует бинарный провал');
+    assert(action.effects.strength > 0 && action.effects.fatigue > 0, 'не показаны сила/усталость');
+    assert(action.effects.skillName, 'не указан развиваемый навык');
+    assert(state.wallet.balanceCents === before.wallet.balanceCents, 'баланс изменился до подтверждения');
+  } finally { await cancelIfNeeded(action); }
 });
-await run(4, 'Текстовый маршрут в другой район', async () => {
-  const currentMap = initial.world.players.find((player) => player.isCurrent)?.mapLocationId;
-  const target = initial.world.locations.find((location) => ['district', 'region'].includes(location.kind) && location.id !== currentMap);
-  assert(target, 'нет доступного района назначения');
-  await createAndCancel({ kind: 'travel', intent: `поехать в ${target.name}`, targetLocationId: target.id }, 'travel');
+
+await run(4, 'Нешаблонное намерение создаёт универсальное предложение', async () => {
+  const { action } = await sendHost('Давай соберу портфолио из трёх лучших работ и отправлю его потенциальному заказчику.');
+  try {
+    assert(action?.status === 'awaiting_confirmation', 'нешаблонное действие не стало предложением');
+    assert(action.description.length > 20, 'нет описания действия');
+    assert(action.effects.summary.length > 10, 'нет ожидаемых последствий');
+  } finally { await cancelIfNeeded(action); }
 });
-await run(5, 'Полный жизненный цикл ритуала', async () => {
-  const title = `Сценарный тест ${Date.now().toString().slice(-6)}`;
-  let state = await request('/api/routines', { method: 'POST', body: JSON.stringify({ title, scheduleLabel: 'Каждый день · 21:00', durationMinutes: 15 }) });
-  const routine = state.routines.find((item) => item.title === title);
-  assert(routine?.status === 'active', 'ритуал не создан');
-  state = await request(`/api/routines/${routine.id}`, { method: 'PATCH', body: JSON.stringify({ mutation: 'pause' }) });
-  assert(state.routines.find((item) => item.id === routine.id)?.status === 'paused', 'пауза не сохранилась');
-  state = await request(`/api/routines/${routine.id}`, { method: 'PATCH', body: JSON.stringify({ mutation: 'resume' }) });
-  assert(state.routines.find((item) => item.id === routine.id)?.status === 'active', 'возобновление не сохранилось');
-  state = await request(`/api/routines/${routine.id}`, { method: 'PATCH', body: JSON.stringify({ mutation: 'skip' }) });
-  assert(state.routines.find((item) => item.id === routine.id)?.skipNext === true, 'пропуск не сохранился');
-  state = await request(`/api/routines/${routine.id}`, { method: 'PATCH', body: JSON.stringify({ mutation: 'cancel' }) });
-  assert(!state.routines.some((item) => item.id === routine.id), 'отменённый ритуал остался активным');
+
+await run(5, 'Недостижимый масштаб объясняется в чате', async () => {
+  const { state, action } = await sendHost('Давай сегодня станем президентом страны и получим полный контроль.');
+  assert(!action, 'недостижимое действие стало карточкой');
+  assert(/не хватает|недостижим|требуется|нельзя|масштаб/i.test(state.hostMessages.at(-1)?.body || ''), 'нет объяснения ограничения');
 });
-await run(6, 'Карьера без глобального уровня', async () => {
-  assert(initial.profile.employment?.title, 'нет активной занятости');
-  assert(initial.profile.skills.length > 0 && initial.profile.experience.length > 0, 'нет evidence/компетенций');
-  assert(!('level' in initial.player) && !('level' in initial.character), 'обнаружен глобальный уровень');
+
+await run(6, 'Создание организации требует название и формат', async () => {
+  const { state, action } = await sendHost('Давай создадим новую организацию.');
+  assert(!action, 'без названия уже создана организация');
+  assert(/назов|название|заниматься|формат|уточн/i.test(state.hostMessages.at(-1)?.body || ''), 'Хост не запросил важные параметры');
 });
-await run(7, 'Состояние Nomad Labs', async () => {
-  const organization = initial.profile.organizations.find((item) => item.name === 'Nomad Labs');
-  assert(organization && organization.members > 0 && organization.ownershipPercent > 0, 'организация или доля не загружены');
+
+await run(7, 'Повторяющееся правило создаётся через Хоста и попадает в план', async () => {
+  const message = 'Давай каждый день, когда освобожусь, заниматься испанским языком 30 минут — сценарная проверка.';
+  const { action } = await sendHost(message);
+  assert(action?.kind === 'schedule' && action.status === 'awaiting_confirmation', 'нет предложения расписания');
+  const state = await request(`/api/actions/${action.id}/confirm`, { method: 'POST', body: '{}' });
+  assert(state.dailyPlan.some((item) => item.actionId === action.id), 'договорённость не появилась в плане дня');
+  assert(state.routines.some((item) => item.id === 'routine-' + action.id), 'повторяющееся правило не сохранено в базе');
 });
-await run(8, 'Многомерные отношения и репутация', async () => {
-  assert(initial.profile.relationships.length >= 3, 'недостаточно канонических отношений');
-  assert(initial.profile.relationships.every((item) => ['trust', 'respect', 'affection', 'resentment'].every((key) => Number.isFinite(item[key]))), 'шкалы отношений повреждены');
-  assert(initial.profile.reputations.some((item) => item.visibility === 'public'), 'нет публичной репутации');
+
+await run(8, 'Профиль: имя и возраст редактируются', async () => {
+  const original = await request('/api/state');
+  const changed = await request('/api/profile', { method: 'PATCH', body: JSON.stringify({ name: 'Проверка', age: 31 }) });
+  assert(changed.player.name === 'Проверка' && changed.player.age === 31, 'профиль не обновился');
+  const restored = await request('/api/profile', { method: 'PATCH', body: JSON.stringify({ name: original.player.name, age: original.player.age ?? 25 }) });
+  assert(restored.player.name === original.player.name, 'профиль не восстановился');
 });
-await run(9, 'Кошелёк, активы и проводки', async () => {
-  assert(Number.isFinite(initial.wallet.balanceCents), 'нет баланса');
-  assert(initial.profile.assets.length > 0, 'нет активов');
-  assert(initial.ledger.length > 0, 'нет журнала проводок');
+
+await run(9, 'Досье не выдаёт World Truth', async () => {
+  const state = await request('/api/state');
+  const others = state.world.players.filter((player) => !player.isCurrent);
+  assert(others.length >= 3, 'нет других участников');
+  assert(others.every((player) => Array.isArray(player.knownFacts)), 'нет слоя знаний персонажа');
+  assert(others.every((player) => !('locationId' in player) && !('mapLocationId' in player)), 'истинное местоположение утекло в UI');
+  assert(others.every((player) => ['public', 'private', 'secret'].includes(player.knowledgeVisibility)), 'не указана видимость знаний');
 });
-await run(10, 'Четыре участника в текстовом досье', async () => {
-  assert(initial.world.players.length === 4, `участников: ${initial.world.players.length}, ожидалось 4`);
-  assert(initial.world.players.every((item) => item.biography && item.lastSeenAt && item.locationId), 'в read-model участника не хватает сведений для досье');
-  assert(initial.world.events.length > 0, 'в досье нет известных событий');
-  assert(initial.world.locations.some((item) => item.kind === 'district'), 'нет текстовых маршрутов');
+
+await run(10, 'Нет глобального уровня и выдуманной Nomad Labs', async () => {
+  const state = await request('/api/state');
+  assert(!('level' in state.player) && !('level' in state.character), 'обнаружен глобальный уровень');
+  assert(!state.profile.organizations.some((item) => item.name === 'Nomad Labs'), 'осталась захардкоженная организация');
+  assert(!state.profile.goals.some((item) => /студи/i.test(item.title)), 'осталась выдуманная цель студии');
+});
+
+await run(11, 'Навыки основаны на evidence и могут пополняться', async () => {
+  const state = await request('/api/state');
+  assert(state.profile.skills.length > 0, 'нет навыков');
+  assert(state.profile.skills.every((skill) => Number.isFinite(skill.evidenceCount)), 'у навыка нет evidence_count');
+  assert(state.profile.experience.length > 0, 'нет журнала опыта');
+});
+
+await run(12, 'Вызов хранит ставку как предложение, а не запускает бой', async () => {
+  const { before, state, action } = await sendHost('Предлагаю Тимуру поединок на ринге по $50 с каждого.');
+  try {
+    assert(action?.kind === 'challenge', `получен kind=${action?.kind || 'нет действия'}`);
+    assert(action.status === 'awaiting_confirmation', 'вызов отправлен без подтверждения');
+    assert(action.effects.summary.includes('$') || action.description.includes('$'), 'ставка не показана в USD');
+    assert(state.wallet.reservedCents === before.wallet.reservedCents, 'ставка зарезервирована до подтверждения');
+  } finally { await cancelIfNeeded(action); }
+});
+
+await run(13, 'Глобальный inbox поддерживает решение и ответ', async () => {
+  const state = await request('/api/state');
+  assert(Array.isArray(state.notifications), 'нет inbox');
+  assert(state.notifications.every((item) => typeof item.canAccept === 'boolean' && typeof item.canReply === 'boolean'), 'уведомления не описывают доступные действия');
+});
+
+await run(14, 'Деньги и резервы разделены', async () => {
+  const state = await request('/api/state');
+  assert(state.wallet.availableCents === state.wallet.balanceCents - state.wallet.reservedCents, 'доступный баланс рассчитан неверно');
+  assert(state.ledger.length > 0, 'нет финансового журнала');
 });
 
 console.log(JSON.stringify({ baseUrl, passed: results.filter((item) => item.status === 'пройден').length, total: results.length, results }, null, 2));

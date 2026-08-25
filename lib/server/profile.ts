@@ -3,11 +3,15 @@ import type {
   CaseState,
   CharacterState,
   CredentialState,
+  DailyPlanItemState,
+  DynamicSectionState,
   EmploymentState,
   ExperienceState,
   HostMessageState,
+  KnowledgeFactState,
   LocationState,
   MarketState,
+  NotificationState,
   OrganizationState,
   ProfileState,
   RelationshipState,
@@ -26,21 +30,24 @@ export async function seedExtendedWorld(db: D1Database, playerId: string, now: s
     ...companionIdentitySeeds(db, now),
     db.prepare(`INSERT OR IGNORE INTO characters
       (id, player_id, name, status, morale, stress, confidence, fatigue, biography, created_at)
-      VALUES (?, ?, 'Алекс', 'active', 68, 27, 61, 18,
-      'Начал путь в Ташкенте с продакт-опытом, небольшим капиталом и желанием построить что-то своё.', ?)`)
+      VALUES (?, ?, 'Алекс', 'active', 68, 0, 61, 18,
+      'Начал путь в Ташкенте с опытом продуктовой работы и желанием самостоятельно выбрать дальнейшее направление.', ?)`)
       .bind(CHARACTER_ID, playerId, now),
+    db.prepare(`INSERT OR IGNORE INTO player_settings (player_id, age, updated_at) VALUES (?, 25, ?)`).bind(playerId, now),
+    db.prepare(`INSERT OR IGNORE INTO character_conditions
+      (character_id, strength, intelligence, updated_at) VALUES (?, 32, 58, ?)`).bind(CHARACTER_ID, now),
     db.prepare(`INSERT OR IGNORE INTO ledger_accounts
       (id, owner_id, name, kind, currency, created_at) VALUES
-      ('account-alex-cash', ?, 'Деньги Алекса', 'asset', 'UZS', ?)`).bind(playerId, now),
+      ('account-alex-cash', ?, 'Деньги персонажа', 'asset', 'USD', ?)`).bind(playerId, now),
     db.prepare(`INSERT OR IGNORE INTO ledger_accounts
       (id, owner_id, name, kind, currency, created_at) VALUES
-      ('account-world-opening', 'world', 'Стартовый капитал мира', 'equity', 'UZS', ?)`).bind(now),
+      ('account-world-opening', 'world', 'Стартовый капитал мира', 'equity', 'USD', ?)`).bind(now),
     db.prepare(`INSERT OR IGNORE INTO ledger_accounts
       (id, owner_id, name, kind, currency, created_at) VALUES
-      ('account-world-services', 'world', 'Услуги мира', 'income', 'UZS', ?)`).bind(now),
+      ('account-world-services', 'world', 'Услуги мира', 'income', 'USD', ?)`).bind(now),
     db.prepare(`INSERT OR IGNORE INTO ledger_accounts
       (id, owner_id, name, kind, currency, created_at) VALUES
-      ('account-world-rewards', 'world', 'Награды мира', 'expense', 'UZS', ?)`).bind(now),
+      ('account-world-rewards', 'world', 'Оплата труда мира', 'expense', 'USD', ?)`).bind(now),
     db.prepare(`INSERT OR IGNORE INTO journal_entries
       (id, reference_type, reference_id, title, created_at)
       VALUES ('journal-opening', 'opening', ?, 'Стартовый баланс', ?)`).bind(playerId, now),
@@ -64,36 +71,23 @@ export async function seedExtendedWorld(db: D1Database, playerId: string, now: s
     db.prepare(`INSERT OR IGNORE INTO experience_events
       (id, character_id, domain, title, outcome, complexity, occurred_at) VALUES
       ('exp-launch', ?, 'Предпринимательство', 'Первый запуск продукта', 'mixed', 'высокая', ?),
-      ('exp-team', ?, 'Управление', 'Координация команды из восьми человек', 'success', 'средняя', ?),
+      ('exp-team', ?, 'Управление', 'Координация команды', 'success', 'средняя', ?),
       ('exp-failure', ?, 'Предпринимательство', 'Неудачная проверка рынка', 'failure', 'средняя', ?)`)
       .bind(CHARACTER_ID, now, CHARACTER_ID, now, CHARACTER_ID, now),
     db.prepare(`INSERT OR IGNORE INTO credentials
       (id, character_id, title, issuer, progress, status, issued_at) VALUES
       ('credential-economics', ?, 'Поведенческая экономика', 'Городская школа', 42, 'active', NULL),
-      ('credential-product', ?, 'Основы продуктовой аналитики', 'Nomad Academy', 100, 'completed', ?)`)
+      ('credential-product', ?, 'Основы продуктовой аналитики', 'Городская академия', 100, 'completed', ?)`)
       .bind(CHARACTER_ID, CHARACTER_ID, now),
     db.prepare(`INSERT OR IGNORE INTO goals
       (id, character_id, title, status, created_at) VALUES
-      ('goal-studio', ?, 'Построить устойчивую продуктовую студию', 'active', ?)`)
-      .bind(CHARACTER_ID, now),
+      ('goal-direction', ?, 'Найти и построить собственное направление', 'active', ?)`).bind(CHARACTER_ID, now),
     db.prepare(`INSERT OR IGNORE INTO assets
       (id, owner_id, title, kind, estimated_value_cents, liquidation_value_cents, location_name, valuation_at) VALUES
       ('asset-phone', ?, 'Смартфон', 'inventory', 62000000, 48000000, 'При себе', ?),
-      ('asset-flat', ?, 'Квартира в Ташкенте', 'property', 7420000000, 6810000000, 'Мой квартал', ?),
-      ('asset-bike', ?, 'Городской велосипед', 'vehicle', 41000000, 29000000, 'Дом Алекса', ?),
-      ('asset-equity', ?, 'Доля в Nomad Labs', 'equity', 4240000000, 3600000000, 'Nomad Labs', ?)`)
-      .bind(CHARACTER_ID, now, CHARACTER_ID, now, CHARACTER_ID, now, CHARACTER_ID, now),
-    db.prepare(`INSERT OR IGNORE INTO organizations
-      (id, name, kind, cash_cents, monthly_revenue_cents, monthly_profit_cents, members, created_at)
-      VALUES ('org-nomad', 'Nomad Labs', 'Продуктовая студия', 2468000000, 8642000000, 2135000000, 8, ?)`)
-      .bind(now),
-    db.prepare(`INSERT OR IGNORE INTO organization_memberships
-      (id, organization_id, character_id, role, permissions_json, created_at)
-      VALUES ('member-alex-nomad', 'org-nomad', ?, 'Сооснователь', '["projects","ordinary_contracts"]', ?)`)
-      .bind(CHARACTER_ID, now),
-    db.prepare(`INSERT OR IGNORE INTO ownership_stakes
-      (id, organization_id, owner_id, basis_points, created_at)
-      VALUES ('stake-alex-nomad', 'org-nomad', ?, 3420, ?)`).bind(CHARACTER_ID, now),
+      ('asset-flat', ?, 'Квартира в Ташкенте', 'property', 7420000000, 6810000000, 'Ташкент', ?),
+      ('asset-bike', ?, 'Городской велосипед', 'vehicle', 41000000, 29000000, 'Дом', ?)`)
+      .bind(CHARACTER_ID, now, CHARACTER_ID, now, CHARACTER_ID, now),
     db.prepare(`INSERT OR IGNORE INTO relationships
       (id, character_id, target_name, trust, respect, affection, resentment) VALUES
       ('rel-timur', ?, 'Тимур', 72, 68, 61, 8),
@@ -119,33 +113,25 @@ export async function seedExtendedWorld(db: D1Database, playerId: string, now: s
       ('market-tools', 'Инструменты для команд', 'district-center', 'Высокий', 'Высокая', 6, ?),
       ('market-education', 'Практическое образование', 'district-old', 'Средний', 'Средняя', 2, ?)`)
       .bind(now, now),
-    db.prepare(`INSERT OR IGNORE INTO contracts
-      (id, character_id, organization_id, kind, title, status, monthly_amount_cents,
-       daily_amount_cents, performance, next_due_at, created_at)
-      VALUES ('employment-nomad', ?, 'org-nomad', 'employment', 'Продакт-менеджер',
-      'active', 934000000, 31130000, 'Стабильно', ?, ?)`)
-      .bind(CHARACTER_ID, new Date(Date.now() + 86_400_000).toISOString(), now),
     db.prepare(`INSERT OR IGNORE INTO story_threads
       (id, character_id, title, status, tension, updated_at) VALUES
-      ('thread-studio', ?, 'Станет ли Nomad Labs устойчивой студией?', 'active', 41, ?),
+      ('thread-direction', ?, 'Какое направление выберет персонаж?', 'active', 28, ?),
       ('thread-partner', ?, 'Неоконченный разговор с Тимуром о партнёрстве', 'active', 23, ?)`)
       .bind(CHARACTER_ID, now, CHARACTER_ID, now),
+    ...knowledgeSeeds(db, now),
     db.prepare(`INSERT OR IGNORE INTO chat_messages
       (id, player_id, role, source, body, created_at) VALUES
       ('chat-host-welcome', ?, 'host', 'WEB',
-      'Я рядом. Ты выбираешь направление, а сервер честно считает цену, время и последствия.', ?)`)
-      .bind(playerId, now),
+      'Я на связи. Можешь спросить что угодно, обсудить вариант или предложить действие — карточка появится только когда в разговоре будет конкретное намерение.', ?)`).bind(playerId, now),
     db.prepare(`INSERT OR IGNORE INTO component_definitions
       (id, key, name, json_schema, ui_schema, version, status) VALUES
-      ('component-portfolio', 'financial_portfolio', 'Инвестиционный портфель',
-      '{"type":"object","properties":{"positions":{"type":"array"}}}',
-      '{"section":"finance","renderer":"generic"}', 1, 'active')`),
+      ('component-dynamic-context', 'dynamic_context', 'Контекст пути',
+      '{"type":"object","additionalProperties":true}',
+      '{"renderer":"key_value","visibility":"private"}', 1, 'active')`),
     db.prepare(`INSERT OR IGNORE INTO action_mechanics
       (action_id, difficulty_label, capacity, probability_bp, rng_seed, roll_bp, succeeded, resolved_at)
-      SELECT id, 'Обычная',
-        CASE WHEN kind IN ('study', 'meditation') THEN 'background' ELSE 'foreground' END,
-        9000, id, NULL, NULL, NULL
-      FROM actions`),
+      SELECT id, 'Обычная', CASE WHEN kind IN ('study', 'meditation') THEN 'background' ELSE 'foreground' END,
+        9000, id, NULL, NULL, NULL FROM actions`),
   ]);
 }
 
@@ -155,105 +141,101 @@ function companionIdentitySeeds(db: D1Database, now: string): D1PreparedStatemen
       (id, name, city, role, energy, health, focus, reputation, created_at) VALUES
       ('demo-timur', 'Тимур', 'Ташкент', 'Операционный менеджер', 76, 81, 58, 44, ?),
       ('demo-dina', 'Дина', 'Ташкент', 'Исследовательница', 69, 88, 79, 51, ?),
-      ('demo-ruslan', 'Руслан', 'Ташкент', 'Инженер', 84, 77, 63, 35, ?)`)
-      .bind(now, now, now),
+      ('demo-ruslan', 'Руслан', 'Ташкент', 'Инженер', 84, 77, 63, 35, ?)`).bind(now, now, now),
     db.prepare(`INSERT OR IGNORE INTO wallets (player_id, balance_cents, currency) VALUES
-      ('demo-timur', 1820000000, 'UZS'),
-      ('demo-dina', 1340000000, 'UZS'),
-      ('demo-ruslan', 960000000, 'UZS')`),
+      ('demo-timur', 1820000, 'USD'), ('demo-dina', 1340000, 'USD'), ('demo-ruslan', 960000, 'USD')`),
     db.prepare(`INSERT OR IGNORE INTO characters
       (id, player_id, name, status, morale, stress, confidence, fatigue, biography, created_at) VALUES
-      ('character-timur', 'demo-timur', 'Тимур', 'active', 71, 31, 66, 24,
-       'Развивает операционные проекты и ищет устойчивые партнёрства.', ?),
-      ('character-dina', 'demo-dina', 'Дина', 'active', 77, 19, 58, 16,
-       'Собирает знания о рынках и городских возможностях.', ?),
-      ('character-ruslan', 'demo-ruslan', 'Руслан', 'active', 64, 22, 72, 27,
-       'Строит технические решения и предпочитает проверять идеи делом.', ?)`)
-      .bind(now, now, now),
+      ('character-timur', 'demo-timur', 'Тимур', 'active', 71, 0, 66, 24, 'Развивает операционные проекты и ищет устойчивые партнёрства.', ?),
+      ('character-dina', 'demo-dina', 'Дина', 'active', 77, 0, 58, 16, 'Собирает знания о рынках и городских возможностях.', ?),
+      ('character-ruslan', 'demo-ruslan', 'Руслан', 'active', 64, 0, 72, 27, 'Строит технические решения и предпочитает проверять идеи делом.', ?)`).bind(now, now, now),
+    db.prepare(`INSERT OR IGNORE INTO character_conditions (character_id, strength, intelligence, updated_at) VALUES
+      ('character-timur', 49, 47, ?), ('character-dina', 28, 76, ?), ('character-ruslan', 58, 63, ?)`).bind(now, now, now),
   ];
 }
 
 function companionLocationSeeds(db: D1Database, now: string): D1PreparedStatement[] {
-  return [
-    db.prepare(`INSERT OR IGNORE INTO character_locations
-      (character_id, location_id, visited_json, updated_at) VALUES
-      ('character-timur', 'place-studio', '["place-studio","district-center"]', ?),
-      ('character-dina', 'place-study', '["place-study","district-old"]', ?),
-      ('character-ruslan', 'place-gym', '["place-gym","district-home"]', ?)`)
-      .bind(now, now, now),
-  ];
+  return [db.prepare(`INSERT OR IGNORE INTO character_locations
+    (character_id, location_id, visited_json, updated_at) VALUES
+    ('character-timur', 'place-studio', '["place-studio","district-center"]', ?),
+    ('character-dina', 'place-study', '["place-study","district-old"]', ?),
+    ('character-ruslan', 'place-gym', '["place-gym","district-home"]', ?)`).bind(now, now, now)];
 }
+
+function knowledgeSeeds(db: D1Database, now: string): D1PreparedStatement[] {
+  return [db.prepare(`INSERT OR IGNORE INTO knowledge_records
+    (id, character_id, subject, statement, confidence, freshness_at, visibility, source) VALUES
+    ('know-timur-role', ?, 'character-timur', 'Тимур занимается операционными проектами и открыт к деловым разговорам.', 82, ?, 'private', 'личное знакомство'),
+    ('know-timur-place', ?, 'character-timur', 'Последнее известное место: деловой центр.', 64, ?, 'private', 'последний контакт'),
+    ('know-dina-role', ?, 'character-dina', 'Дина исследует рынки и городские возможности.', 78, ?, 'private', 'личное знакомство'),
+    ('know-ruslan-role', ?, 'character-ruslan', 'Руслан работает над инженерными решениями.', 75, ?, 'private', 'личное знакомство')`)
+    .bind(CHARACTER_ID, now, CHARACTER_ID, now, CHARACTER_ID, now, CHARACTER_ID, now)];
+}
+
 function locationSeeds(db: D1Database): D1PreparedStatement[] {
   const rows = [
     ['city-tashkent', null, 'Ташкент', 'city', 'Общий городской слой мира.', 'Низкий', 0, 0, 50, 50, 'Т', 'travel', 0],
-    ['place-home', 'district-home', 'Дом Алекса', 'place', 'Восстановиться и разобрать планы.', 'Знакомо', 0, 0, 49, 58, '⌂', 'meditation', 1],
-    ['place-studio', 'district-center', 'Nomad Labs', 'place', 'Контракты, команда и проекты.', 'Низкий', 0, 5, 73, 36, 'N', 'work', 2],
-    ['place-gym', 'district-home', 'Спортплощадка', 'place', 'Тренировка и здоровье.', 'Низкий', 18000000, 5, 23, 65, '↟', 'training', 3],
-    ['place-study', 'district-old', 'Чайхана-клуб', 'place', 'Учёба, встречи и знания.', 'Низкий', 0, 5, 27, 34, '✦', 'study', 4],
-    ['district-home', 'city-tashkent', 'Мой квартал', 'district', 'Дом, друзья и привычные маршруты.', 'Знакомо', 0, 0, 14, 71, '⌂', 'travel', 10],
-    ['district-center', 'city-tashkent', 'Центр', 'district', 'Работа, встречи и деловые связи.', 'Низкий', 128000000, 5, 32, 52, '2', 'travel', 11],
-    ['district-old', 'city-tashkent', 'Старый город', 'district', 'Ремесло, история и новые знакомства.', 'Средний', 128000000, 5, 52, 66, '3', 'travel', 12],
-    ['district-sergeli', 'city-tashkent', 'Сергели', 'district', 'Растущий район и новые возможности.', 'Средний', 128000000, 5, 67, 39, '4', 'travel', 13],
-    ['district-chimgan', 'city-tashkent', 'Чимган', 'region', 'Дальний маршрут и восстановление.', 'Высокий', 128000000, 5, 85, 20, '5', 'travel', 14],
+    ['place-home', 'district-home', 'Дом', 'place', 'Восстановиться и разобрать планы.', 'Знакомо', 0, 0, 49, 58, '⌂', 'meditation', 1],
+    ['place-studio', 'district-center', 'Деловой центр', 'place', 'Работа, команды и проекты.', 'Низкий', 0, 5, 73, 36, 'Д', 'work', 2],
+    ['place-gym', 'district-home', 'Спортплощадка', 'place', 'Тренировка и восстановление.', 'Низкий', 1800, 5, 23, 65, '↟', 'training', 3],
+    ['place-study', 'district-old', 'Учебный клуб', 'place', 'Учёба, встречи и знания.', 'Низкий', 0, 5, 27, 34, '✦', 'study', 4],
+    ['district-home', 'city-tashkent', 'Домашний район', 'district', 'Дом, друзья и привычные маршруты.', 'Знакомо', 0, 0, 14, 71, '⌂', 'travel', 10],
+    ['district-center', 'city-tashkent', 'Центр', 'district', 'Работа, встречи и деловые связи.', 'Низкий', 400, 18, 32, 52, '2', 'travel', 11],
+    ['district-old', 'city-tashkent', 'Старый город', 'district', 'Ремесло, история и новые знакомства.', 'Средний', 600, 25, 52, 66, '3', 'travel', 12],
+    ['district-sergeli', 'city-tashkent', 'Сергели', 'district', 'Растущий район и новые возможности.', 'Средний', 800, 35, 67, 39, '4', 'travel', 13],
+    ['district-chimgan', 'city-tashkent', 'Чимган', 'region', 'Дальний маршрут и восстановление.', 'Высокий', 1500, 90, 85, 20, '5', 'travel', 14],
   ] as const;
-  const inserts = rows.map((row) => db.prepare(`INSERT OR IGNORE INTO locations
-    (id, parent_id, name, kind, note, risk_label, travel_cost_cents, travel_minutes,
-     map_x, map_y, glyph, action_kind, sort_order)
+  return rows.map((row) => db.prepare(`INSERT OR IGNORE INTO locations
+    (id, parent_id, name, kind, note, risk_label, travel_cost_cents, travel_minutes, map_x, map_y, glyph, action_kind, sort_order)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(...row));
-  return [...inserts, db.prepare(`UPDATE locations SET parent_id = CASE id
-    WHEN 'place-home' THEN 'district-home'
-    WHEN 'place-studio' THEN 'district-center'
-    WHEN 'place-gym' THEN 'district-home'
-    WHEN 'place-study' THEN 'district-old'
-    ELSE parent_id END
-    WHERE id IN ('place-home', 'place-studio', 'place-gym', 'place-study')`)];
+}
+
+function parseFacts(rows: Record<string, unknown>[]): KnowledgeFactState[] {
+  return rows.map((row) => ({
+    id: String(row.id), statement: String(row.statement), confidence: Number(row.confidence),
+    freshnessAt: String(row.freshness_at), visibility: row.visibility as KnowledgeFactState['visibility'], source: String(row.source),
+  }));
+}
+
+function parseDynamicSections(rows: Record<string, unknown>[]): DynamicSectionState[] {
+  return rows.flatMap((row) => {
+    try {
+      const data = JSON.parse(String(row.data_json)) as Record<string, unknown>;
+      const visibility = data._visibility === 'public' || data._visibility === 'secret' ? data._visibility : 'private';
+      const fields = Object.entries(data).filter(([key, value]) => key !== '_visibility' && ['string', 'number', 'boolean'].includes(typeof value))
+        .map(([key, value]) => ({ key, label: key.replace(/_/g, ' '), value: value as string | number | boolean }));
+      return fields.length ? [{ id: String(row.id), title: String(row.name), visibility, fields }] : [];
+    } catch {
+      return [];
+    }
+  });
 }
 
 export async function getExtendedState(db: D1Database, playerId: string): Promise<{
   character: CharacterState;
+  age: number | null;
+  strength: number;
+  intelligence: number;
   world: WorldState;
   profile: ProfileState;
   hostMessages: HostMessageState[];
+  dailyPlan: DailyPlanItemState[];
+  notifications: NotificationState[];
+  dynamicSections: DynamicSectionState[];
 }> {
-  const [
-    character,
-    currentLocation,
-    locations,
-    worldPlayers,
-    skills,
-    experience,
-    credentials,
-    assets,
-    organizations,
-    relationships,
-    reputations,
-    goals,
-    worldEvents,
-    markets,
-    employment,
-    storyThreads,
-    cases,
-    hostMessages,
-  ] = await Promise.all([
+  const [character, settings, conditions, currentLocation, locations, worldPlayers, knowledge, skills, experience, credentials, assets, organizations, relationships, reputations, goals, worldEvents, markets, employment, storyThreads, cases, hostMessages, dailyPlan, notifications, dynamicComponents] = await Promise.all([
     db.prepare('SELECT * FROM characters WHERE player_id = ?').bind(playerId).first<Record<string, unknown>>(),
+    db.prepare('SELECT age FROM player_settings WHERE player_id = ?').bind(playerId).first<Record<string, unknown>>(),
+    db.prepare('SELECT strength, intelligence FROM character_conditions WHERE character_id = ?').bind(CHARACTER_ID).first<Record<string, unknown>>(),
     db.prepare('SELECT * FROM character_locations WHERE character_id = ?').bind(CHARACTER_ID).first<Record<string, unknown>>(),
     db.prepare('SELECT * FROM locations ORDER BY sort_order ASC').all<Record<string, unknown>>(),
-    db.prepare(`SELECT p.id player_id, p.name, p.role, c.status, c.biography,
-      cl.location_id, cl.updated_at last_seen_at,
-      CASE WHEN l.kind = 'place' THEN l.parent_id ELSE l.id END map_location_id
-      FROM players p
-      JOIN characters c ON c.player_id = p.id
-      JOIN character_locations cl ON cl.character_id = c.id
-      JOIN locations l ON l.id = cl.location_id
-      ORDER BY p.created_at ASC`).all<Record<string, unknown>>(),
+    db.prepare(`SELECT p.id player_id, p.name, p.role, c.id character_id, c.status, c.biography FROM players p JOIN characters c ON c.player_id = p.id ORDER BY p.created_at ASC`).all<Record<string, unknown>>(),
+    db.prepare('SELECT * FROM knowledge_records WHERE character_id = ? ORDER BY freshness_at DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM skills WHERE character_id = ? ORDER BY competence DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM experience_events WHERE character_id = ? ORDER BY occurred_at DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM credentials WHERE character_id = ? ORDER BY status ASC, progress DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM assets WHERE owner_id = ? ORDER BY estimated_value_cents DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
-    db.prepare(`SELECT o.*, m.role, s.basis_points FROM organizations o
-      JOIN organization_memberships m ON m.organization_id = o.id
-      JOIN ownership_stakes s ON s.organization_id = o.id AND s.owner_id = m.character_id
-      WHERE m.character_id = ?`).bind(CHARACTER_ID).all<Record<string, unknown>>(),
+    db.prepare(`SELECT o.*, m.role, s.basis_points FROM organizations o JOIN organization_memberships m ON m.organization_id = o.id JOIN ownership_stakes s ON s.organization_id = o.id AND s.owner_id = m.character_id WHERE m.character_id = ?`).bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM relationships WHERE character_id = ? ORDER BY trust DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM reputation_scores WHERE character_id = ? ORDER BY value DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM goals WHERE character_id = ? AND status = ?').bind(CHARACTER_ID, 'active').all<Record<string, unknown>>(),
@@ -262,71 +244,39 @@ export async function getExtendedState(db: D1Database, playerId: string): Promis
     db.prepare("SELECT c.*, o.name organization_name FROM contracts c LEFT JOIN organizations o ON o.id = c.organization_id WHERE c.character_id = ? AND c.kind = 'employment' AND c.status = 'active' LIMIT 1").bind(CHARACTER_ID).first<Record<string, unknown>>(),
     db.prepare('SELECT * FROM story_threads WHERE character_id = ? ORDER BY tension DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare("SELECT * FROM cases WHERE character_id = ? AND status = 'active' ORDER BY updated_at DESC").bind(CHARACTER_ID).all<Record<string, unknown>>(),
-    db.prepare('SELECT * FROM chat_messages WHERE player_id = ? ORDER BY created_at DESC LIMIT 12').bind(playerId).all<Record<string, unknown>>(),
+    db.prepare(`SELECT cm.*, cal.action_id FROM chat_messages cm LEFT JOIN chat_action_links cal ON cal.message_id = cm.id WHERE cm.player_id = ? ORDER BY cm.created_at DESC, CASE WHEN cm.role = 'host' THEN 0 ELSE 1 END ASC LIMIT 40`).bind(playerId).all<Record<string, unknown>>(),
+    db.prepare("SELECT * FROM daily_plan_items WHERE player_id = ? AND status NOT IN ('cancelled') AND (status = 'running' OR scheduled_for IS NULL OR date(scheduled_for, '+5 hours') = date('now', '+5 hours')) ORDER BY COALESCE(scheduled_for, created_at) ASC LIMIT 30").bind(playerId).all<Record<string, unknown>>(),
+    db.prepare('SELECT * FROM notifications WHERE player_id = ? ORDER BY created_at DESC LIMIT 30').bind(playerId).all<Record<string, unknown>>(),
+    db.prepare(`SELECT ec.id, ec.data_json, cd.name FROM entity_components ec JOIN component_definitions cd ON cd.id = ec.definition_id WHERE ec.entity_id = ? AND cd.status = 'active' ORDER BY ec.updated_at DESC`).bind(CHARACTER_ID).all<Record<string, unknown>>(),
   ]);
 
-  if (!character || !currentLocation) throw new Error('Расширенное состояние персонажа не создано');
+  if (!character || !currentLocation || !conditions) throw new Error('Расширенное состояние персонажа не создано');
   const visited = new Set(JSON.parse(String(currentLocation.visited_json)) as string[]);
-  const playerColors: Record<string, WorldPlayerState['color']> = {
-    'demo-alex': 'lime',
-    'demo-timur': 'coral',
-    'demo-dina': 'violet',
-    'demo-ruslan': 'amber',
-  };
+  const allFacts = parseFacts(knowledge.results);
+  const playerColors: Record<string, WorldPlayerState['color']> = { 'demo-alex': 'lime', 'demo-timur': 'coral', 'demo-dina': 'violet', 'demo-ruslan': 'amber' };
+  const players = worldPlayers.results.map((row): WorldPlayerState => {
+    const isCurrent = String(row.player_id) === playerId;
+    const facts = isCurrent ? [] : allFacts.filter((fact) => knowledge.results.find((raw) => String(raw.id) === fact.id && String(raw.subject) === String(row.character_id)));
+    const placeFact = facts.find((fact) => fact.statement.startsWith('Последнее известное место:'));
+    return {
+      id: String(row.player_id), name: String(row.name), role: String(row.role), biography: String(row.biography),
+      color: playerColors[String(row.player_id)] ?? 'amber',
+      knownLocation: isCurrent ? String(currentLocation.location_id) : placeFact?.statement.replace('Последнее известное место:', '').trim() ?? null,
+      lastSeenAt: isCurrent ? String(currentLocation.updated_at) : facts[0]?.freshnessAt ?? null,
+      knowledgeVisibility: isCurrent ? 'private' : (facts[0]?.visibility ?? 'public'),
+      knownFacts: facts, status: row.status as WorldPlayerState['status'], isCurrent,
+    };
+  });
 
   return {
-    character: {
-      id: String(character.id),
-      name: String(character.name),
-      status: character.status as CharacterState['status'],
-      morale: Number(character.morale),
-      stress: Number(character.stress),
-      confidence: Number(character.confidence),
-      fatigue: Number(character.fatigue),
-      biography: String(character.biography),
-    },
+    age: settings?.age == null ? null : Number(settings.age), strength: Number(conditions.strength), intelligence: Number(conditions.intelligence),
+    character: { id: String(character.id), name: String(character.name), status: character.status as CharacterState['status'], morale: Number(character.morale), confidence: Number(character.confidence), fatigue: Number(character.fatigue), biography: String(character.biography) },
     world: {
       currentLocationId: String(currentLocation.location_id),
-      locations: locations.results.map((row): LocationState => ({
-        id: String(row.id),
-        name: String(row.name),
-        kind: row.kind as LocationState['kind'],
-        note: String(row.note),
-        riskLabel: String(row.risk_label),
-        travelCostCents: Number(row.travel_cost_cents),
-        travelMinutes: Number(row.travel_minutes),
-        x: Number(row.map_x),
-        y: Number(row.map_y),
-        glyph: String(row.glyph),
-        actionKind: row.action_kind as LocationState['actionKind'],
-        visited: visited.has(String(row.id)),
-      })),
-      players: worldPlayers.results.map((row): WorldPlayerState => ({
-        id: String(row.player_id),
-        name: String(row.name),
-        role: String(row.role),
-        biography: String(row.biography),
-        color: playerColors[String(row.player_id)] ?? 'amber',
-        locationId: String(row.location_id),
-        mapLocationId: String(row.map_location_id),
-        lastSeenAt: String(row.last_seen_at),
-        status: row.status as WorldPlayerState['status'],
-        isCurrent: String(row.player_id) === playerId,
-      })),
-      events: worldEvents.results.map((row): WorldEventState => ({
-        id: String(row.id),
-        title: String(row.title),
-        summary: String(row.summary),
-        scope: String(row.scope),
-        happenedAt: String(row.happened_at),
-      })),
-      markets: markets.results.map((row): MarketState => ({
-        id: String(row.id),
-        name: String(row.name),
-        demand: String(row.demand),
-        competition: String(row.competition),
-        trend: Number(row.trend),
-      })),
+      locations: locations.results.map((row): LocationState => ({ id: String(row.id), name: String(row.name), kind: row.kind as LocationState['kind'], note: String(row.note), riskLabel: String(row.risk_label), travelCostCents: Number(row.travel_cost_cents), travelMinutes: Number(row.travel_minutes), x: Number(row.map_x), y: Number(row.map_y), glyph: String(row.glyph), actionKind: row.action_kind as LocationState['actionKind'], visited: visited.has(String(row.id)) })),
+      players,
+      events: worldEvents.results.map((row): WorldEventState => ({ id: String(row.id), title: String(row.title), summary: String(row.summary), scope: String(row.scope), happenedAt: String(row.happened_at) })),
+      markets: markets.results.map((row): MarketState => ({ id: String(row.id), name: String(row.name), demand: String(row.demand), competition: String(row.competition), trend: Number(row.trend) })),
     },
     profile: {
       skills: skills.results.map((row): SkillState => ({ id: String(row.id), name: String(row.name), domain: String(row.domain), competence: Number(row.competence), evidenceCount: Number(row.evidence_count) })),
@@ -338,21 +288,16 @@ export async function getExtendedState(db: D1Database, playerId: string): Promis
       reputations: reputations.results.map((row): ReputationState => ({ domain: String(row.domain), value: Number(row.value), visibility: row.visibility as ReputationState['visibility'] })),
       goals: goals.results.map((row) => ({ id: String(row.id), title: String(row.title), status: row.status as 'active', createdAt: String(row.created_at) })),
       storyThreads: storyThreads.results.map((row): StoryThreadState => ({ id: String(row.id), title: String(row.title), status: String(row.status), tension: Number(row.tension) })),
-      employment: employment ? {
-        organization: String(employment.organization_name),
-        title: String(employment.title),
-        monthlySalaryCents: Number(employment.monthly_amount_cents),
-        dailyPayoutCents: Number(employment.daily_amount_cents),
-        performance: String(employment.performance),
-        nextSession: String(employment.next_due_at),
-      } satisfies EmploymentState : null,
+      employment: employment ? { organization: String(employment.organization_name), title: String(employment.title), monthlySalaryCents: Number(employment.monthly_amount_cents), dailyPayoutCents: Number(employment.daily_amount_cents), performance: String(employment.performance), nextSession: String(employment.next_due_at) } satisfies EmploymentState : null,
       cases: cases.results.map((row): CaseState => ({ id: String(row.id), title: String(row.title), stage: String(row.stage), visibility: String(row.visibility) })),
     },
     hostMessages: hostMessages.results.reverse().map((row): HostMessageState => ({
-      id: String(row.id),
-      role: row.role as HostMessageState['role'],
-      body: String(row.body),
-      createdAt: String(row.created_at),
+      id: String(row.id), role: row.role as HostMessageState['role'], body: String(row.body),
+      kind: row.action_id ? 'proposal' : row.role === 'host' && String(row.body).trim().endsWith('?') ? 'clarification' : 'dialogue',
+      actionId: row.action_id ? String(row.action_id) : null, createdAt: String(row.created_at),
     })),
+    dailyPlan: dailyPlan.results.map((row): DailyPlanItemState => ({ id: String(row.id), title: String(row.title), details: String(row.details), scheduledFor: row.scheduled_for ? String(row.scheduled_for) : null, startCondition: String(row.start_condition), status: row.status as DailyPlanItemState['status'], actionId: row.action_id ? String(row.action_id) : null })),
+    notifications: notifications.results.map((row): NotificationState => ({ id: String(row.id), category: row.category as NotificationState['category'], senderName: String(row.sender_name), title: String(row.title), body: String(row.body), status: row.status as NotificationState['status'], canAccept: Boolean(row.can_accept), canReply: Boolean(row.can_reply), createdAt: String(row.created_at) })),
+    dynamicSections: parseDynamicSections(dynamicComponents.results),
   };
 }

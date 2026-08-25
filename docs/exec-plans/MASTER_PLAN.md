@@ -2,86 +2,83 @@
 
 ## Фаза 0 — продукт и архитектура — выполнено
 
-- [x] восстановить итоговые решения;
-- [x] зафиксировать инварианты;
-- [x] определить продуктовую навигацию;
-- [x] создать проектную память.
+- [x] построчно прочитать 9 838 строк двух исходных документов;
+- [x] зафиксировать инварианты, модели знаний и границу AI/backend;
+- [x] собрать полный аудит и каталог 50 сценариев;
+- [x] закрепить четыре продуктовых раздела: Хост, Досье, План, Профиль.
 
-## Фаза 1 — интерактивный frontend-срез — выполнено
+## Фаза 1 — самостоятельный игровой интерфейс — выполнено
 
-- [x] восемь ключевых экранов;
-- [x] русская локализация;
-- [x] мобильная адаптация;
-- [x] навигация, таймер, формы и уведомления;
-- [x] метаданные и социальный preview;
-- [x] финальная проверка сборки и lint.
+- [x] отказаться от копирования ранних референсов и собрать самостоятельный игровой shell;
+- [x] единый Telegram-подобный разговор с Хостом;
+- [x] утверждённое текстовое «Досье» без карты и утечки World Truth;
+- [x] План текущего дня без ручного трекера привычек;
+- [x] профиль, семь состояний, навыки, карьера, активы, связи, история и кошелёк;
+- [x] глобальный колокольчик/inbox;
+- [x] desktop и mobile visual QA;
+- [x] полностью русский UI.
 
-## Фаза 2 — core backend — выполняется
+## Фаза 2 — persistent backend adapter — вертикальный срез выполнен
 
-- [ ] PostgreSQL и migrations;
-- [x] identity verifier abstraction, player и character;
-- [x] entity-component registry и capability gaps;
-- [x] domain events, AgentRun и audit primitives;
-- [x] API contracts; [ ] OpenAPI generation.
+- [x] D1 schema/migrations и канонический `GameState`;
+- [x] Player/Character, Knowledge projection и visibility;
+- [x] actions, mechanics, effects, payloads, chat links и daily plan;
+- [x] routines, notifications и fund reservations;
+- [x] component registry, AgentRun и capability gaps;
+- [x] профильные настройки и динамические состояния;
+- [ ] PostgreSQL adapter и migration runner;
+- [ ] OpenAPI generation.
 
-## Фаза 3 — deterministic engine — вертикальный срез выполнен
+## Фаза 3 — deterministic action engine — вертикальный срез выполнен
 
-- [x] ActionProposal validator;
-- [x] confirmation tokens;
-- [x] effects и reproducible RNG;
-- [x] capacities; [ ] cooldowns;
-- [x] idempotent reconciliation; [ ] отдельный persistent worker.
+- [x] intent → semantic draft → server ActionProposal;
+- [x] отдельное подтверждение опасных/платных действий;
+- [x] server-side price, duration, capacity, probability и effects;
+- [x] progress/chance/deterministic resolution modes;
+- [x] воспроизводимый RNG и идемпотентный transition token;
+- [x] request-driven reconciliation;
+- [x] dynamic skill/evidence progression;
+- [ ] cooldowns, dependency executor и persistent worker.
 
 ## Фаза 4 — экономика и планирование — выполняется
 
-- [x] double-entry ledger для действий;
-- [ ] recurring actions;
-- [x] contracts, employment и ownership primitives;
-- [ ] market engine.
+- [x] USD read-model и реалистичный вертикальный каталог;
+- [x] available/reserved balance;
+- [x] double-entry postings для расходов и доходов действий;
+- [x] today plan, AT/AFTER/WHEN_FREE metadata;
+- [x] recurring-rule создаётся через Хоста и скрыт от основного интерфейса;
+- [x] universal Organization seed-free flow;
+- [x] challenge proposal, reservation и inbox второй стороны;
+- [ ] фактический dependency/recurring scheduler;
+- [ ] market, contracts, escrow settlement и deterministic PvP.
 
-## Фаза 5 — AI orchestration — ожидает
+## Фаза 5 — AI orchestration — вертикальный срез выполнен
 
-- [x] skill router;
-- [ ] context builder;
-- [ ] referee, narrator и world director;
-- [ ] schema-bound tool calls;
-- [ ] evals и prompt versioning.
+- [x] Gemini Agent Platform REST v1 с runtime secret;
+- [x] schema-bound conversation/clarification/intent decision;
+- [x] domain skill router и versioned playbooks;
+- [x] Knowledge-safe Context Builder;
+- [x] prompt version в AgentRun;
+- [x] deterministic fallback и server safety-gate;
+- [ ] narrator применяется к уже рассчитанным исходам;
+- [ ] referee/world-director workers;
+- [ ] evals, canary rollout и prompt observability.
 
-## Фаза 6 — Telegram и production — ожидает
+## Фаза 6 — multiplayer production — ожидает
 
-- [ ] private bot и group news;
-- [ ] Mini App init verification;
-- [ ] notifications;
-- [ ] observability, backups и Linux deployment;
-- [ ] нагрузочные и security tests.
+- [ ] Telegram identity, webhook и Mini App init verification;
+- [ ] outbox delivery для уведомлений;
+- [ ] actor permissions, consent и full PvP lifecycle;
+- [ ] role-aware NPC replies и event graph;
+- [ ] observability, backup/restore и security/load tests;
+- [ ] production PostgreSQL + persistent queue.
 
-## Промежуточный серверный срез Sites/D1 — выполнено
+## Контроль качества текущей итерации
 
-- [x] постоянная D1 schema и migration;
-- [x] player, wallet, ledger, routines и domain events;
-- [x] ActionProposal, confirmation, cancel, running и resolved;
-- [x] идемпотентное списание и request-driven reconciliation;
-- [x] клиент переведён с simulation state на API;
-- [ ] Telegram identity вместо тестового игрока;
-- [ ] PostgreSQL adapter и постоянная очередь;
-- [x] double-entry journal entries/postings для стартового баланса и действий.
-
-## Фаза 2.1 — игровая география и аудит исходников — выполнено
-
-- [x] построчный аудит 9 838 строк двух исходных файлов;
-- [x] три визуальных концепта «Квартала» и «Мира» — исторический этап, отменён решением 25;
-- [x] серверные цели поездок и миграция `action_targets`;
-- [x] четыре постоянных Player/Character с фишками на картах;
-- [x] атомарное перемещение после успешного разрешения;
-- [x] новый настольный «Квартал» и атлас «Мир» — исторический этап, интерфейсы удалены решением 25;
-- [x] единый development `AiProvider`;
-- [ ] внешний schema-bound AI provider — после передачи API;
-- [ ] browser visual QA — после устранения системного Windows ACL.
-
-## Фаза 2.2 — новый текстовый раздел о мире — ожидает выбора
-
-- [x] удалить «Квартал» и картографический «Мир» из маршрутов, навигации, JSX и CSS;
-- [x] удалить три отклонённых графических концепта;
-- [x] подготовить концепты A «Хроника», B «Досье» и C «Сводка»;
-- [ ] получить выбор пользователя и зафиксировать название раздела;
-- [ ] реализовать выбранную композицию на каноническом `GameState` без мок-данных.
+- [x] `npm run typecheck`;
+- [x] `npm run lint` без предупреждений;
+- [x] `npm run test:safety`;
+- [x] `npm run test:scenarios` — 14/14;
+- [x] `npm run build`;
+- [x] desktop/mobile headless Chrome QA;
+- [ ] private production deployment текущей версии.

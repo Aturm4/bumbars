@@ -1,4 +1,13 @@
-export type ActionKind = 'training' | 'study' | 'work' | 'meditation' | 'travel';
+export type ActionKind =
+  | 'training'
+  | 'study'
+  | 'work'
+  | 'meditation'
+  | 'travel'
+  | 'schedule'
+  | 'organization'
+  | 'challenge'
+  | 'generic';
 
 export type ActionStatus =
   | 'awaiting_confirmation'
@@ -14,17 +23,33 @@ export type CapacityKind = 'foreground' | 'background' | 'passive';
 export interface PlayerState {
   id: string;
   name: string;
+  age: number | null;
   city: string;
   role: string;
   energy: number;
   health: number;
-  focus: number;
-  reputation: number;
+  strength: number;
+  intelligence: number;
 }
 
 export interface WalletState {
   balanceCents: number;
-  currency: 'UZS';
+  availableCents: number;
+  reservedCents: number;
+  currency: 'USD';
+}
+
+export interface ActionEffectState {
+  energy: number;
+  health: number;
+  strength: number;
+  intelligence: number;
+  morale: number;
+  confidence: number;
+  fatigue: number;
+  moneyCents: number;
+  skillName: string | null;
+  summary: string;
 }
 
 export interface GameAction {
@@ -44,6 +69,9 @@ export interface GameAction {
   rollPercent: number | null;
   succeeded: boolean | null;
   rewardMoneyCents: number;
+  effects: ActionEffectState;
+  resolutionMode: 'progress' | 'chance' | 'deterministic';
+  resultGrade: 'минимальный' | 'обычный' | 'сильный' | null;
   riskLabel: string;
   createdAt: string;
   confirmedAt: string | null;
@@ -57,7 +85,6 @@ export interface CharacterState {
   name: string;
   status: 'active' | 'incapacitated' | 'incarcerated' | 'dead';
   morale: number;
-  stress: number;
   confidence: number;
   fatigue: number;
   biography: string;
@@ -189,7 +216,53 @@ export interface HostMessageState {
   id: string;
   role: 'player' | 'host';
   body: string;
+  kind: 'dialogue' | 'clarification' | 'proposal' | 'outcome' | 'system';
+  actionId: string | null;
   createdAt: string;
+}
+
+export interface KnowledgeFactState {
+  id: string;
+  statement: string;
+  confidence: number;
+  freshnessAt: string;
+  visibility: 'public' | 'private' | 'secret';
+  source: string;
+}
+
+export interface DailyPlanItemState {
+  id: string;
+  title: string;
+  details: string;
+  scheduledFor: string | null;
+  startCondition: string;
+  status: 'planned' | 'waiting' | 'running' | 'completed' | 'blocked' | 'skipped' | 'cancelled';
+  actionId: string | null;
+}
+
+export interface NotificationState {
+  id: string;
+  category: 'message' | 'proposal' | 'challenge' | 'world' | 'system';
+  senderName: string;
+  title: string;
+  body: string;
+  status: 'unread' | 'read' | 'accepted' | 'declined' | 'replied';
+  canAccept: boolean;
+  canReply: boolean;
+  createdAt: string;
+}
+
+export interface DynamicFieldState {
+  key: string;
+  label: string;
+  value: string | number | boolean;
+}
+
+export interface DynamicSectionState {
+  id: string;
+  title: string;
+  visibility: 'public' | 'private' | 'secret';
+  fields: DynamicFieldState[];
 }
 
 export interface ProfileState {
@@ -220,9 +293,10 @@ export interface WorldPlayerState {
   role: string;
   biography: string;
   color: 'lime' | 'coral' | 'violet' | 'amber';
-  locationId: string;
-  mapLocationId: string;
-  lastSeenAt: string;
+  knownLocation: string | null;
+  lastSeenAt: string | null;
+  knowledgeVisibility: 'public' | 'private' | 'secret';
+  knownFacts: KnowledgeFactState[];
   status: CharacterState['status'];
   isCurrent: boolean;
 }
@@ -266,6 +340,9 @@ export interface GameState {
   world: WorldState;
   profile: ProfileState;
   hostMessages: HostMessageState[];
+  dailyPlan: DailyPlanItemState[];
+  notifications: NotificationState[];
+  dynamicSections: DynamicSectionState[];
   serverTime: string;
 }
 

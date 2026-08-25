@@ -1,7 +1,8 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import type { ActionKind, ApiError, GameAction, GameState, RoutineState } from '@/lib/game-types';
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
+import type { ApiError, GameAction, GameState, NotificationState } from '@/lib/game-types';
 
 type View = 'host' | 'dossier' | 'plan' | 'profile';
 type DossierTab = 'people' | 'events' | 'relations';
@@ -10,458 +11,114 @@ type ProfilePage = 'character' | 'career' | 'skills' | 'assets' | 'relations' | 
 const NAV: Array<{ id: View; label: string; glyph: string }> = [
   { id: 'host', label: 'Хост', glyph: '✦' },
   { id: 'dossier', label: 'Досье', glyph: '▰' },
-  { id: 'plan', label: 'Путь', glyph: '▦' },
-  { id: 'profile', label: 'Алекс', glyph: '●' },
-];
-
-const PROMPTS = [
-  'провести силовую тренировку',
-  'взять рабочий контракт',
-  'изучить новый модуль',
-  'сделать практику внимания',
+  { id: 'plan', label: 'План', glyph: '▦' },
+  { id: 'profile', label: 'Профиль', glyph: '●' },
 ];
 
 function formatMoney(cents: number): string {
-  return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(cents / 100)} сум`;
+  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'USD', maximumFractionDigits: cents % 100 ? 2 : 0 }).format(cents / 100);
+}
+function formatTime(value: string): string { return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' }).format(new Date(value)); }
+function formatDate(value: string): string { return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Tashkent', day: 'numeric', month: 'short' }).format(new Date(value)); }
+function dayNumber(value: string): number { const date = new Date(value); return Math.floor((date.getTime() - Date.UTC(date.getUTCFullYear(), 0, 0)) / 86_400_000); }
+function remaining(action: GameAction | undefined, now: number): string { if (!action?.dueAt) return '00:00'; const seconds = Math.max(0, Math.ceil((new Date(action.dueAt).getTime() - now) / 1000)); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; }
+function readableRequestError(reason: unknown, fallback: string): string { if (reason instanceof TypeError && /fetch|network|load failed/i.test(reason.message)) return 'Не удалось связаться с сервером. Проверь соединение и повтори.'; return reason instanceof Error && reason.message ? reason.message : fallback; }
+function statusText(action: GameAction): string { return { awaiting_confirmation: 'Нужно решение', running: 'Выполняется', resolved: 'Завершено', cancelled: 'Отклонено', failed: 'Не удалось' }[action.status]; }
+function assetKindText(kind: string): string { return { inventory: 'инвентарь', property: 'недвижимость', vehicle: 'транспорт', investment: 'инвестиция', equity: 'доля' }[kind] ?? 'актив'; }
+function relationshipLabel(trust: number, resentment: number): string { if (resentment >= 40) return 'напряжённые'; if (trust >= 70) return 'близкие'; if (trust >= 50) return 'надёжные'; if (trust >= 30) return 'знакомые'; return 'неопределённые'; }
+
+function GameActionCard({ action, now, busy, onConfirm, onCancel, compact = false }: { action: GameAction; now: number; busy: string | null; onConfirm: (id: string) => void; onCancel: (id: string) => void; compact?: boolean }) {
+  const estimate = action.resolutionMode === 'chance' ? `оценка исхода: ${Math.round(action.probabilityPercent)}%` : action.resolutionMode === 'progress' ? 'исход: градация прогресса' : 'исход: без случайного провала';
+  return <article className={`game-action-card action-${action.status} ${compact ? 'compact' : ''}`}>
+    <div className="action-seal">{action.kind === 'training' ? '↟' : action.kind === 'study' ? '✎' : action.kind === 'work' ? '▣' : action.kind === 'travel' ? '⌖' : action.kind === 'organization' ? '◆' : action.kind === 'challenge' ? '⚔' : '○'}</div>
+    <div className="action-card-copy">
+      <div className="action-card-meta"><span>{statusText(action)}</span><time>{action.status === 'running' ? remaining(action, now) : action.durationSeconds ? `${Math.ceil(action.durationSeconds / 60)} мин` : 'сразу после решения'}</time></div>
+      <h3>{action.title}</h3>{!compact && <p>{action.description}</p>}
+      <div className="action-tags"><span>{action.costCents ? formatMoney(action.costCents) : 'без расходов'}</span><span>{action.energyCost ? `энергия −${action.energyCost}` : 'энергия не тратится'}</span><span>{estimate}</span><span>риск: {action.riskLabel.toLowerCase()}</span></div>
+      {!compact && <div className="action-benefits"><small>ЧТО ИЗМЕНИТСЯ</small><strong>{action.effects.summary}</strong></div>}
+      {action.resultGrade && <small className="action-roll">качество: {action.resultGrade}{action.resolutionMode === 'chance' && action.rollPercent !== null ? ` · серверный roll ${action.rollPercent.toFixed(2)}%` : ''}</small>}
+      {action.outcome && !compact && <blockquote>{action.outcome}</blockquote>}
+      {action.status === 'awaiting_confirmation' && <div className="action-decisions"><button disabled={busy === action.id} onClick={() => onConfirm(action.id)}>Подтвердить</button><button disabled={busy === action.id} onClick={() => onCancel(action.id)}>Отказаться</button></div>}
+    </div>
+  </article>;
 }
 
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+function ResourceBar({ label, value, tone, glyph, inverse = false }: { label: string; value: number; tone: string; glyph: string; inverse?: boolean }) {
+  const width = inverse ? 100 - value : value;
+  return <div className={`character-stat tone-${tone}`}><span>{glyph}</span><div><small>{label}</small><strong>{value}<em>/100</em></strong><i><b style={{ width: `${width}%` }} /></i></div></div>;
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Tashkent', day: 'numeric', month: 'short' }).format(new Date(value));
+function ProfileContent({ state, page, finished, editing, onEdit }: { state: GameState; page: ProfilePage; finished: GameAction[]; editing: boolean; onEdit: (value: boolean) => void }) {
+  if (page === 'character') return <div className="character-sheet">
+    <section className="stats-paper"><small>СОСТОЯНИЕ</small><h2>Не уровень, а текущее состояние</h2>
+      <ResourceBar label="Энергия" value={state.player.energy} tone="lime" glyph="ϟ"/><ResourceBar label="Здоровье" value={state.player.health} tone="coral" glyph="♥"/>
+      <ResourceBar label="Сила" value={state.player.strength} tone="amber" glyph="↟"/><ResourceBar label="Интеллект" value={state.player.intelligence} tone="cyan" glyph="◇"/>
+      <ResourceBar label="Мораль" value={state.character.morale} tone="amber" glyph="☀"/><ResourceBar label="Уверенность" value={state.character.confidence} tone="lime" glyph="◆"/>
+      <ResourceBar label="Усталость" value={state.character.fatigue} tone="violet" glyph="◒" inverse/>
+    </section>
+    <section className="backpack-paper"><small>ПРОФИЛЬ</small><h2>{state.player.name}</h2><p>{state.player.age ? `${state.player.age} лет · ` : ''}{state.player.role} · {state.player.city}</p><button className="paper-button" onClick={() => onEdit(!editing)}>Настроить профиль</button>
+      {editing && <ProfileEditor state={state} onClose={() => onEdit(false)}/>}<div className="experience-list">{finished.slice(0, 5).map((action) => <div key={action.id}><span>✓</span><div><strong>{action.title}</strong><small>{action.outcome}</small></div><time>{action.resolvedAt ? formatDate(action.resolvedAt) : ''}</time></div>)}</div>
+    </section>
+    {state.dynamicSections.map((section) => <section className="profile-book-card wide dynamic-section" key={section.id}><small>{section.visibility === 'public' ? 'ПУБЛИЧНО' : section.visibility === 'secret' ? 'СЕКРЕТНО' : 'ЛИЧНОЕ'}</small><h2>{section.title}</h2><dl>{section.fields.map((field) => <div key={field.key}><dt>{field.label}</dt><dd>{String(field.value)}</dd></div>)}</dl></section>)}
+  </div>;
+  if (page === 'career') { const job = state.profile.employment; return <div className="profile-ledger-grid"><section className="profile-book-card"><small>КАРЬЕРА</small><h2>{job?.title ?? 'Нет активной должности'}</h2><p>{job?.organization ?? 'Новая работа, повышение и увольнение начинаются с разговора с Хостом.'}</p>{job && <dl><div><dt>Месячный эквивалент</dt><dd>{formatMoney(job.monthlySalaryCents)}</dd></div><div><dt>Выплата</dt><dd>{formatMoney(job.dailyPayoutCents)} / день</dd></div><div><dt>Результат</dt><dd>{job.performance}</dd></div><div><dt>Следующая сессия</dt><dd>{formatDate(job.nextSession)} · {formatTime(job.nextSession)}</dd></div></dl>}</section><section className="profile-book-card"><small>ОБРАЗОВАНИЕ</small><h2>Учебный путь</h2>{state.profile.credentials.map((item) => <article className="progress-record" key={item.id}><div><strong>{item.title}</strong><small>{item.issuer} · {item.status === 'completed' ? 'завершено' : item.progress + '%'}</small></div><i><b style={{ width: item.progress + '%' }}/></i></article>)}</section><section className="profile-book-card wide"><small>ЦЕЛИ БЕЗ ПОДСКАЗОК</small>{state.profile.goals.map((goal) => <h3 key={goal.id}>✦ {goal.title}</h3>)}<p>Хост помнит направление, но не выдаёт оптимальный roadmap.</p></section></div>; }
+  if (page === 'skills') return <div className="profile-ledger-grid"><section className="profile-book-card wide"><small>КОМПЕТЕНТНОСТЬ</small><h2>Динамические навыки и доказательства</h2>{state.profile.skills.map((skill) => <article className="skill-record" key={skill.id}><div><strong>{skill.name}</strong><small>{skill.domain} · доказательств: {skill.evidenceCount}</small></div><span>{skill.competence}</span><i><b style={{ width: skill.competence + '%' }}/></i></article>)}</section><section className="profile-book-card wide"><small>ОПЫТ</small>{state.profile.experience.map((item) => <article className="evidence-record" key={item.id}><span className={item.outcome}>{item.outcome === 'success' ? '✓' : item.outcome === 'failure' ? '×' : '≈'}</span><div><strong>{item.title}</strong><small>{item.domain} · сложность: {item.complexity}</small></div><time>{formatDate(item.occurredAt)}</time></article>)}</section></div>;
+  if (page === 'assets') return <div className="profile-ledger-grid"><section className="profile-book-card wide"><small>АКТИВЫ</small><h2>Активы</h2>{state.profile.assets.map((asset) => <article className="asset-record" key={asset.id}><div><strong>{asset.title}</strong><small>{asset.locationName} · {assetKindText(asset.kind)}</small></div><b>{formatMoney(asset.estimatedValueCents)}</b><em>быстрая продажа: {formatMoney(asset.liquidationValueCents)}</em></article>)}</section>{state.profile.organizations.length ? state.profile.organizations.map((org) => <section className="profile-book-card wide organization-record" key={org.id}><small>{org.kind.toUpperCase()}</small><h2>{org.name}</h2><p>{org.role} · доля {org.ownershipPercent}%</p><dl><div><dt>Казна</dt><dd>{formatMoney(org.cashCents)}</dd></div><div><dt>Выручка / месяц</dt><dd>{formatMoney(org.monthlyRevenueCents)}</dd></div><div><dt>Результат / месяц</dt><dd>{formatMoney(org.monthlyProfitCents)}</dd></div><div><dt>Участники</dt><dd>{org.members}</dd></div></dl></section>) : <section className="profile-book-card wide empty-organization"><small>ОРГАНИЗАЦИИ</small><h2>Пока ничего не создано</h2><p>Компания, фонд, клуб, партия или другая структура появится только после твоего решения в разговоре с Хостом.</p></section>}</div>;
+  if (page === 'relations') return <div className="profile-ledger-grid"><section className="profile-book-card"><small>ОТНОШЕНИЯ</small><h2>Несколько измерений</h2>{state.profile.relationships.map((rel) => <article className="relation-record" key={rel.id}><strong>{rel.name}</strong><div><span>доверие {rel.trust}</span><span>уважение {rel.respect}</span><span>тепло {rel.affection}</span><span>обида {rel.resentment}</span></div></article>)}</section><section className="profile-book-card"><small>РЕПУТАЦИЯ</small><h2>По разным кругам</h2>{state.profile.reputations.filter((rep) => rep.visibility !== 'hidden').map((rep) => <article className="reputation-record" key={rep.domain}><strong>{rep.domain}</strong><span>{rep.value}</span><small>{rep.visibility === 'public' ? 'видно миру' : 'личная оценка'}</small></article>)}</section><section className="profile-book-card wide"><small>АКТИВНЫЕ НИТИ</small>{state.profile.storyThreads.map((thread) => <article className="thread-record" key={thread.id}><strong>{thread.title}</strong><i><b style={{ width: thread.tension + '%' }}/></i><span>напряжение {thread.tension}</span></article>)}{state.profile.cases.length === 0 && <p>Открытых расследований, известных персонажу, нет.</p>}</section></div>;
+  if (page === 'biography') return <div className="profile-ledger-grid"><section className="profile-book-card wide biography-card"><small>БИОГРАФИЯ</small><h2>{state.character.name}</h2><blockquote>{state.character.biography}</blockquote><p>История строится из важных событий, а не из выдуманного ежедневного журнала.</p></section><section className="profile-book-card wide"><small>ПОСЛЕДНИЕ СОБЫТИЯ</small>{state.events.slice(0, 8).map((event) => <article className="evidence-record" key={event.id}><span>✦</span><div><strong>{event.title}</strong><small>{event.body}</small></div><time>{formatDate(event.createdAt)}</time></article>)}</section></div>;
+  return <div className="wallet-sheet"><section className="wallet-pouch"><small>В КОШЕЛЬКЕ</small><h2>{formatMoney(state.wallet.balanceCents)}</h2><p>Свободно: {formatMoney(state.wallet.availableCents)}{state.wallet.reservedCents ? ` · зарезервировано: ${formatMoney(state.wallet.reservedCents)}` : ''}</p><div><span>операций <strong>{state.ledger.length}</strong></span><span>доходов <strong>{state.ledger.filter((entry) => entry.amountCents > 0).length}</strong></span><span>расходов <strong>{state.ledger.filter((entry) => entry.amountCents < 0).length}</strong></span></div></section><section className="receipt-stack"><small>ПОСЛЕДНИЕ ЧЕКИ</small>{state.ledger.map((entry) => <article key={entry.id}><div><strong>{entry.title}</strong><small>{formatDate(entry.createdAt)} · {formatTime(entry.createdAt)}</small></div><b className={entry.amountCents >= 0 ? 'gain' : 'spend'}>{entry.amountCents >= 0 ? '+' : '−'}{formatMoney(Math.abs(entry.amountCents))}</b></article>)}</section></div>;
 }
 
-function dayNumber(value: string): number {
-  const date = new Date(value);
-  const start = Date.UTC(date.getUTCFullYear(), 0, 0);
-  return Math.floor((date.getTime() - start) / 86_400_000);
+function ProfileEditor({ state, onClose }: { state: GameState; onClose: () => void }) {
+  const [name, setName] = useState(state.player.name); const [age, setAge] = useState(String(state.player.age ?? '')); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  async function submit(event: FormEvent) { event.preventDefault(); setBusy(true); setError(''); try { const response = await fetch('/api/profile', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, age: Number(age) }) }); const body = await response.json() as ApiError; if (!response.ok) throw new Error(body.error); window.location.reload(); } catch (reason) { setError(readableRequestError(reason, 'Профиль не обновлён')); setBusy(false); } }
+  return <form className="profile-editor" onSubmit={submit}><label>Имя<input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={40}/></label><label>Возраст<input value={age} onChange={(event) => setAge(event.target.value)} type="number" min={14} max={120}/></label>{error && <p>{error}</p>}<div><button disabled={busy}>Сохранить</button><button type="button" onClick={onClose}>Закрыть</button></div></form>;
 }
-
-function remaining(action: GameAction | undefined, now: number): string {
-  if (!action?.dueAt) return '00:00';
-  const seconds = Math.max(0, Math.ceil((new Date(action.dueAt).getTime() - now) / 1000));
-  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-}
-
-function readableRequestError(reason: unknown, fallback: string): string {
-  if (reason instanceof TypeError && /fetch|network|load failed/i.test(reason.message)) {
-    return 'Не удалось связаться с сервером. Проверь соединение и повтори.';
-  }
-  return reason instanceof Error && reason.message ? reason.message : fallback;
-}
-
-function statusText(action: GameAction): string {
-  return {
-    awaiting_confirmation: 'Нужно решение',
-    running: 'В пути',
-    resolved: 'Завершено',
-    cancelled: 'Отклонено',
-    failed: 'Не удалось',
-  }[action.status];
-}
-function assetKindText(kind: string): string {
-  return {
-    inventory: 'инвентарь',
-    property: 'недвижимость',
-    vehicle: 'транспорт',
-    investment: 'инвестиция',
-    equity: 'доля в компании',
-  }[kind] ?? 'актив';
-}
-
-
-function GameActionCard({
-  action,
-  now,
-  busy,
-  onConfirm,
-  onCancel,
-  compact = false,
-}: {
-  action: GameAction;
-  now: number;
-  busy: string | null;
-  onConfirm: (id: string) => void;
-  onCancel: (id: string) => void;
-  compact?: boolean;
-}) {
-  return (
-    <article className={`game-action-card action-${action.status} ${compact ? 'compact' : ''}`}>
-      <div className="action-seal">{action.kind === 'training' ? '↟' : action.kind === 'study' ? '✎' : action.kind === 'work' ? 'N' : action.kind === 'travel' ? '⌖' : '○'}</div>
-      <div className="action-card-copy">
-        <div className="action-card-meta"><span>{statusText(action)}</span><time>{action.status === 'running' ? remaining(action, now) : `${Math.ceil(action.durationSeconds / 60)} мин`}</time></div>
-        <h3>{action.title}</h3>
-        {!compact && <p>{action.description}</p>}
-        <div className="action-tags"><span>{action.costCents ? formatMoney(action.costCents) : 'без расходов'}</span><span>{action.energyCost ? `−${action.energyCost} энергии` : 'без усталости'}</span><span>оценка: {Math.round(action.probabilityPercent)}%</span><span>{action.capacity === 'foreground' ? 'занимает персонажа' : 'можно в фоне'}</span><span>риск: {action.riskLabel.toLowerCase()}</span></div>
-        {action.rollPercent !== null && <small className="action-roll">бросок сервера: {action.rollPercent.toFixed(2)}% · {action.succeeded ? 'успех' : 'неудача'}</small>}
-        {action.outcome && !compact && <blockquote>{action.outcome}</blockquote>}
-        {action.status === 'awaiting_confirmation' && (
-          <div className="action-decisions">
-            <button disabled={busy === action.id} onClick={() => onConfirm(action.id)}>Начать</button>
-            <button disabled={busy === action.id} onClick={() => onCancel(action.id)}>Отказаться</button>
-          </div>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function ResourceBar({ label, value, tone, glyph }: { label: string; value: number; tone: string; glyph: string }) {
-  return <div className={`character-stat tone-${tone}`}><span>{glyph}</span><div><small>{label}</small><strong>{value}<em>/100</em></strong><i><b style={{ width: `${value}%` }} /></i></div></div>;
-}
-
-function RoutineToken({ routine, busy, confirming, onMutate, onConfirmCancel }: {
-  routine: RoutineState;
-  busy: string | null;
-  confirming: boolean;
-  onMutate: (id: string, mutation: 'skip' | 'pause' | 'resume' | 'cancel') => void;
-  onConfirmCancel: (id: string | null) => void;
-}) {
-  const isBusy = busy === routine.id;
-  return (
-    <article className={`routine-token ${routine.status === 'paused' ? 'paused' : ''}`}>
-      <div className="streak-flame"><strong>{routine.streak}</strong><span>дней</span></div>
-      <div className="routine-token-copy"><small>{routine.status === 'active' ? 'АКТИВНЫЙ РИТУАЛ' : 'НА ПАУЗЕ'}</small><h3>{routine.title}</h3><p>{routine.scheduleLabel} · {routine.durationMinutes} мин</p>{routine.skipNext && <em>следующий раз пропущен</em>}</div>
-      <div className="routine-token-actions">
-        {confirming ? (
-          <><button className="danger" disabled={isBusy} onClick={() => onMutate(routine.id, 'cancel')}>Точно отменить</button><button onClick={() => onConfirmCancel(null)}>Оставить</button></>
-        ) : routine.status === 'active' ? (
-          <><button disabled={isBusy || routine.skipNext} onClick={() => onMutate(routine.id, 'skip')}>Пропустить</button><button disabled={isBusy} onClick={() => onMutate(routine.id, 'pause')}>Пауза</button><button className="icon-choice" onClick={() => onConfirmCancel(routine.id)} aria-label={`Отменить ритуал ${routine.title}`}>×</button></>
-        ) : (
-          <><button disabled={isBusy} onClick={() => onMutate(routine.id, 'resume')}>Продолжить</button><button className="icon-choice" onClick={() => onConfirmCancel(routine.id)} aria-label={`Отменить ритуал ${routine.title}`}>×</button></>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function ProfileContent({ state, page, finished }: { state: GameState; page: ProfilePage; finished: GameAction[] }) {
-  if (page === 'character') {
-    return <div className="character-sheet">
-      <section className="stats-paper"><small>СОСТОЯНИЕ</small><h2>Не уровень, а прожитый опыт</h2>
-        <ResourceBar label="Энергия" value={state.player.energy} tone="lime" glyph="ϟ"/>
-        <ResourceBar label="Здоровье" value={state.player.health} tone="coral" glyph="♥"/>
-        <ResourceBar label="Фокус" value={state.player.focus} tone="cyan" glyph="◎"/>
-        <ResourceBar label="Мораль" value={state.character.morale} tone="amber" glyph="☀"/>
-        <div className="psyche-row"><span>Стресс <b>{state.character.stress}</b></span><span>Уверенность <b>{state.character.confidence}</b></span><span>Усталость <b>{state.character.fatigue}</b></span></div>
-      </section>
-      <section className="backpack-paper"><small>РЮКЗАК И ДОКАЗАТЕЛЬСТВА</small><h2>Что Алекс забирает с собой</h2>
-        <div className="inventory-grid">{state.profile.assets.filter((asset) => asset.kind === 'inventory' || asset.kind === 'vehicle').map((asset) => <div key={asset.id}><span>{asset.kind === 'vehicle' ? '⌁' : '▤'}</span><strong>{asset.title}</strong><small>{formatMoney(asset.estimatedValueCents)}</small></div>)}</div>
-        <div className="experience-list">{finished.slice(0, 5).map((action) => <div key={action.id}><span>✓</span><div><strong>{action.title}</strong><small>{action.outcome}</small></div><time>{action.resolvedAt ? formatDate(action.resolvedAt) : ''}</time></div>)}</div>
-      </section>
-    </div>;
-  }
-
-  if (page === 'career') {
-    const job = state.profile.employment;
-    return <div className="profile-ledger-grid">
-      <section className="profile-book-card"><small>КАРЬЕРА</small><h2>{job?.title ?? 'Свободный путь'}</h2><p>{job?.organization ?? 'Нет активного трудового контракта'}</p>
-        {job && <dl><div><dt>Месячный эквивалент</dt><dd>{formatMoney(job.monthlySalaryCents)}</dd></div><div><dt>Игровая выплата</dt><dd>{formatMoney(job.dailyPayoutCents)} / день</dd></div><div><dt>Результат</dt><dd>{job.performance}</dd></div><div><dt>Следующая сессия</dt><dd>{formatDate(job.nextSession)} · {formatTime(job.nextSession)}</dd></div></dl>}
-      </section>
-      <section className="profile-book-card"><small>ОБРАЗОВАНИЕ</small><h2>Учебный путь</h2>{state.profile.credentials.map((item) => <article className="progress-record" key={item.id}><div><strong>{item.title}</strong><small>{item.issuer} · {item.status === 'completed' ? 'завершено' : item.progress + '%'}</small></div><i><b style={{ width: item.progress + '%' }}/></i></article>)}</section>
-      <section className="profile-book-card wide"><small>ЦЕЛИ БЕЗ ПОДСКАЗОК</small>{state.profile.goals.map((goal) => <h3 key={goal.id}>✦ {goal.title}</h3>)}<p>Хост помнит направление, но не превращает его в готовый маршрут.</p></section>
-    </div>;
-  }
-
-  if (page === 'skills') {
-    return <div className="profile-ledger-grid">
-      <section className="profile-book-card wide"><small>КОМПЕТЕНТНОСТЬ</small><h2>Навыки и доказательства</h2>{state.profile.skills.map((skill) => <article className="skill-record" key={skill.id}><div><strong>{skill.name}</strong><small>{skill.domain} · доказательств: {skill.evidenceCount}</small></div><span>{skill.competence}</span><i><b style={{ width: skill.competence + '%' }}/></i></article>)}</section>
-      <section className="profile-book-card wide"><small>ОПЫТ</small>{state.profile.experience.map((item) => <article className="evidence-record" key={item.id}><span className={item.outcome}>{item.outcome === 'success' ? '✓' : item.outcome === 'failure' ? '×' : '≈'}</span><div><strong>{item.title}</strong><small>{item.domain} · сложность: {item.complexity}</small></div><time>{formatDate(item.occurredAt)}</time></article>)}</section>
-    </div>;
-  }
-
-  if (page === 'assets') {
-    return <div className="profile-ledger-grid">
-      <section className="profile-book-card wide"><small>АКТИВЫ</small><h2>То, чем персонаж действительно владеет</h2>{state.profile.assets.map((asset) => <article className="asset-record" key={asset.id}><div><strong>{asset.title}</strong><small>{asset.locationName} · {assetKindText(asset.kind)}</small></div><b>{formatMoney(asset.estimatedValueCents)}</b><em>быстрая продажа: {formatMoney(asset.liquidationValueCents)}</em></article>)}</section>
-      {state.profile.organizations.map((org) => <section className="profile-book-card wide organization-record" key={org.id}><small>ОРГАНИЗАЦИЯ</small><h2>{org.name}</h2><p>{org.kind} · {org.role} · доля {org.ownershipPercent}%</p><dl><div><dt>Казна</dt><dd>{formatMoney(org.cashCents)}</dd></div><div><dt>Выручка / месяц</dt><dd>{formatMoney(org.monthlyRevenueCents)}</dd></div><div><dt>Прибыль / месяц</dt><dd>{formatMoney(org.monthlyProfitCents)}</dd></div><div><dt>Участники</dt><dd>{org.members}</dd></div></dl></section>)}
-    </div>;
-  }
-
-  if (page === 'relations') {
-    return <div className="profile-ledger-grid">
-      <section className="profile-book-card"><small>ОТНОШЕНИЯ</small><h2>Не один friendship score</h2>{state.profile.relationships.map((rel) => <article className="relation-record" key={rel.id}><strong>{rel.name}</strong><div><span>доверие {rel.trust}</span><span>уважение {rel.respect}</span><span>тепло {rel.affection}</span><span>обида {rel.resentment}</span></div></article>)}</section>
-      <section className="profile-book-card"><small>РЕПУТАЦИЯ</small><h2>По разным кругам</h2>{state.profile.reputations.filter((rep) => rep.visibility !== 'hidden').map((rep) => <article className="reputation-record" key={rep.domain}><strong>{rep.domain}</strong><span>{rep.value}</span><small>{rep.visibility === 'public' ? 'видно миру' : 'личная оценка'}</small></article>)}</section>
-      <section className="profile-book-card wide"><small>АКТИВНЫЕ НИТИ</small>{state.profile.storyThreads.map((thread) => <article className="thread-record" key={thread.id}><strong>{thread.title}</strong><i><b style={{ width: thread.tension + '%' }}/></i><span>напряжение {thread.tension}</span></article>)}{state.profile.cases.length === 0 && <p>Открытых расследований, известных персонажу, нет.</p>}</section>
-    </div>;
-  }
-
-  if (page === 'biography') {
-    return <div className="profile-ledger-grid">
-      <section className="profile-book-card wide biography-card"><small>БИОГРАФИЯ</small><h2>{state.character.name}</h2><blockquote>{state.character.biography}</blockquote><p>История строится из важных событий, а не из ежедневного журнала.</p></section>
-      <section className="profile-book-card wide"><small>ПОСЛЕДНИЕ СОБЫТИЯ</small>{state.events.slice(0, 8).map((event) => <article className="evidence-record" key={event.id}><span>✦</span><div><strong>{event.title}</strong><small>{event.body}</small></div><time>{formatDate(event.createdAt)}</time></article>)}</section>
-    </div>;
-  }
-
-  return <div className="wallet-sheet"><section className="wallet-pouch"><small>В КОШЕЛЬКЕ</small><h2>{formatMoney(state.wallet.balanceCents)}</h2><p>Баланс меняется только через сбалансированные серверные проводки.</p><div><span>операций <strong>{state.ledger.length}</strong></span><span>доходов <strong>{state.ledger.filter((entry) => entry.amountCents > 0).length}</strong></span><span>расходов <strong>{state.ledger.filter((entry) => entry.amountCents < 0).length}</strong></span></div></section><section className="receipt-stack"><small>ПОСЛЕДНИЕ ЧЕКИ</small>{state.ledger.map((entry) => <article key={entry.id}><div><strong>{entry.title}</strong><small>{formatDate(entry.createdAt)} · {formatTime(entry.createdAt)}</small></div><b className={entry.amountCents >= 0 ? 'gain' : 'spend'}>{entry.amountCents >= 0 ? '+' : '−'}{formatMoney(Math.abs(entry.amountCents))}</b></article>)}</section></div>;
-}
-
-function relationshipLabel(trust: number, resentment: number): string {
-  if (resentment >= 40) return 'напряжённые';
-  if (trust >= 70) return 'близкие';
-  if (trust >= 50) return 'надёжные';
-  if (trust >= 30) return 'знакомые';
-  return 'неопределённые';
-}
-
-function DossierScreen({ state, tab, busy, onTab, onTravel, onOpenHistory }: {
-  state: GameState;
-  tab: DossierTab;
-  busy: boolean;
-  onTab: (tab: DossierTab) => void;
-  onTravel: (locationId: string, locationName: string) => void;
-  onOpenHistory: () => void;
-}) {
-  const locations = new Map(state.world.locations.map((location) => [location.id, location.name]));
+function DossierScreen({ state, tab, onTab, onOpenHistory }: { state: GameState; tab: DossierTab; onTab: (tab: DossierTab) => void; onOpenHistory: () => void }) {
   const others = state.world.players.filter((player) => !player.isCurrent);
   const hostRelation = state.profile.relationships.find((item) => item.name === 'Хост');
   const hostMessage = state.hostMessages[state.hostMessages.length - 1];
-  const currentMapLocationId = state.world.players.find((player) => player.isCurrent)?.mapLocationId;
-  const knownPlaces = state.world.locations.filter((location) => location.kind === 'district' || location.kind === 'region');
-  const peopleCount = others.length + 1;
-
-  return <div className="dossier-screen game-screen-panel">
-    <section className="dossier-folder" aria-label="Досье Алекса">
-      <header className="dossier-file-heading">
-        <span className="dossier-clip" aria-hidden="true" />
-        <div><h1>ДОСЬЕ</h1><p>Люди, связи и то, что тебе известно</p></div>
-        <span className="dossier-round-stamp" aria-hidden="true">Б</span>
-      </header>
-
-      <div className="dossier-tabs" role="tablist" aria-label="Разделы досье">
-        <button role="tab" aria-selected={tab === 'people'} className={tab === 'people' ? 'active' : ''} onClick={() => onTab('people')}>ЛЮДИ <span>{peopleCount}</span></button>
-        <button role="tab" aria-selected={tab === 'events'} className={tab === 'events' ? 'active' : ''} onClick={() => onTab('events')}>СОБЫТИЯ <span>{state.world.events.length}</span></button>
-        <button role="tab" aria-selected={tab === 'relations'} className={tab === 'relations' ? 'active' : ''} onClick={() => onTab('relations')}>СВЯЗИ <span>{state.profile.relationships.length}</span></button>
-      </div>
-
-      <div className="dossier-file-body">
-        {tab === 'people' && <div className="dossier-card-stack">
-          {others.map((person, index) => {
-            const relation = state.profile.relationships.find((item) => item.name === person.name);
-            return <article className={`dossier-index-card tone-${person.color}`} key={person.id}>
-              <span className="dossier-side-tab" aria-hidden="true" />
-              <header><span className="dossier-initial">{person.name.slice(0, 1)}</span><div><h2>{person.name}</h2><p>{person.role}</p></div><b>{index === 1 ? 'ОБЩЕЕ' : 'ЛИЧНОЕ'}</b></header>
-              <dl>
-                <div><dt>отношение:</dt><dd>{relation ? relationshipLabel(relation.trust, relation.resentment) : 'не определено'}</dd></div>
-                <div><dt>последний контакт:</dt><dd>{formatDate(person.lastSeenAt)} · {formatTime(person.lastSeenAt)} · {locations.get(person.locationId) ?? 'место неизвестно'}</dd></div>
-                <div><dt>что известно:</dt><dd>{person.biography}</dd></div>
-              </dl>
-            </article>;
-          })}
-          <article className="dossier-index-card tone-lime dossier-host-card">
-            <span className="dossier-side-tab" aria-hidden="true" />
-            <header><span className="dossier-initial">Х</span><div><h2>Хост</h2><p>ИИ-ведущий</p></div><b>СЛУЖЕБНОЕ</b></header>
-            <dl>
-              <div><dt>отношение:</dt><dd>{hostRelation ? relationshipLabel(hostRelation.trust, hostRelation.resentment) : 'доверенное'}</dd></div>
-              <div><dt>последний контакт:</dt><dd>{hostMessage ? `${formatDate(hostMessage.createdAt)} · ${formatTime(hostMessage.createdAt)}` : 'ещё не было'}</dd></div>
-              <div><dt>что известно:</dt><dd>Объясняет исход, а деньги, время, шанс и последствия считает сервер.</dd></div>
-            </dl>
-          </article>
-        </div>}
-
-        {tab === 'events' && <div className="dossier-card-stack dossier-event-stack">
-          {state.world.events.map((event, index) => <article className={`dossier-index-card tone-${index % 2 ? 'amber' : 'coral'}`} key={event.id}>
-            <span className="dossier-side-tab" aria-hidden="true" />
-            <header><span className="dossier-initial">{index + 1}</span><div><h2>{event.title}</h2><p>{event.scope}</p></div><b>ИЗВЕСТНО</b></header>
-            <dl><div><dt>когда:</dt><dd>{formatDate(event.happenedAt)} · {formatTime(event.happenedAt)}</dd></div><div><dt>что произошло:</dt><dd>{event.summary}</dd></div></dl>
-          </article>)}
-          {knownPlaces.map((location) => {
-            const isCurrent = location.id === currentMapLocationId;
-            return <article className="dossier-index-card tone-violet dossier-route-card" key={location.id}>
-              <span className="dossier-side-tab" aria-hidden="true" />
-              <header><span className="dossier-initial">{location.glyph}</span><div><h2>{location.name}</h2><p>{location.kind === 'region' ? 'известный регион' : 'известный район'}</p></div><b>{isCurrent ? 'ВЫ ЗДЕСЬ' : 'МАРШРУТ'}</b></header>
-              <dl><div><dt>что известно:</dt><dd>{location.note}</dd></div><div><dt>условия:</dt><dd>{location.travelMinutes} мин · {formatMoney(location.travelCostCents)} · риск {location.riskLabel.toLowerCase()}</dd></div></dl>
-              <button disabled={busy || isCurrent} onClick={() => onTravel(location.id, location.name)}>{isCurrent ? 'ТЕКУЩЕЕ МЕСТО' : 'ПОДГОТОВИТЬ ПОЕЗДКУ'}</button>
-            </article>;
-          })}
-        </div>}
-
-        {tab === 'relations' && <div className="dossier-card-stack dossier-relations-stack">
-          {state.profile.relationships.map((relation, index) => <article className={`dossier-index-card tone-${['lime', 'coral', 'violet', 'amber'][index % 4]}`} key={relation.id}>
-            <span className="dossier-side-tab" aria-hidden="true" />
-            <header><span className="dossier-initial">{relation.name.slice(0, 1)}</span><div><h2>{relation.name}</h2><p>{relationshipLabel(relation.trust, relation.resentment)}</p></div><b>{relation.trust >= 60 ? 'БЛИЗКИЕ' : 'ЛИЧНОЕ'}</b></header>
-            <div className="dossier-relation-metrics"><span>доверие <b>{relation.trust}</b></span><span>уважение <b>{relation.respect}</b></span><span>тепло <b>{relation.affection}</b></span><span>обида <b>{relation.resentment}</b></span></div>
-          </article>)}
-        </div>}
-      </div>
-
-      <footer className="dossier-connection-slip">
-        <strong>СОСТОЯНИЕ<br/>СВЯЗЕЙ</strong>
-        <div>{state.profile.relationships.slice(0, 2).map((relation, index) => <span key={relation.id}><i className={index ? 'violet' : ''} />{relation.name}: доверие {relation.trust}</span>)}</div>
-        <b aria-hidden="true">↗</b>
-      </footer>
-      <button className="dossier-open-history" onClick={onOpenHistory}>ОТКРЫТЬ ИСТОРИЮ</button>
-    </section>
-  </div>;
+  const visibilityLabel = { public: 'ПУБЛИЧНО', private: 'ЛИЧНОЕ ЗНАНИЕ', secret: 'СЕКРЕТНО' } as const;
+  return <div className="dossier-screen game-screen-panel"><section className="dossier-folder" aria-label={`Досье ${state.player.name}`}>
+    <header className="dossier-file-heading"><span className="dossier-clip" aria-hidden="true"/><div><h1>ДОСЬЕ</h1><p>Люди, связи и только доступные тебе сведения</p></div><span className="dossier-round-stamp" aria-hidden="true">Б</span></header>
+    <div className="dossier-tabs" role="tablist"><button role="tab" aria-selected={tab === 'people'} className={tab === 'people' ? 'active' : ''} onClick={() => onTab('people')}>ЛЮДИ <span>{others.length + 1}</span></button><button role="tab" aria-selected={tab === 'events'} className={tab === 'events' ? 'active' : ''} onClick={() => onTab('events')}>СОБЫТИЯ <span>{state.world.events.length}</span></button><button role="tab" aria-selected={tab === 'relations'} className={tab === 'relations' ? 'active' : ''} onClick={() => onTab('relations')}>СВЯЗИ <span>{state.profile.relationships.length}</span></button></div>
+    <div className="dossier-file-body">
+      {tab === 'people' && <div className="dossier-card-stack">{others.map((person) => { const relation = state.profile.relationships.find((item) => item.name === person.name); return <article className={`dossier-index-card tone-${person.color}`} key={person.id}><span className="dossier-side-tab"/><header><span className="dossier-initial">{person.name.slice(0, 1)}</span><div><h2>{person.name}</h2><p>{person.role}</p></div><b>{visibilityLabel[person.knowledgeVisibility]}</b></header><dl><div><dt>отношение:</dt><dd>{relation ? relationshipLabel(relation.trust, relation.resentment) : 'не определено'}</dd></div><div><dt>последний контакт:</dt><dd>{person.lastSeenAt ? `${formatDate(person.lastSeenAt)} · ${formatTime(person.lastSeenAt)}` : 'надёжных сведений нет'}{person.knownLocation ? ` · ${person.knownLocation}` : ''}</dd></div>{person.knownFacts.length ? person.knownFacts.map((fact) => <div key={fact.id}><dt>{fact.source} · уверенность {fact.confidence}%:</dt><dd>{fact.statement}</dd></div>) : <div><dt>что известно:</dt><dd>Кроме публичного профиля надёжных сведений нет.</dd></div>}</dl></article>; })}<article className="dossier-index-card tone-lime dossier-host-card"><span className="dossier-side-tab"/><header><span className="dossier-initial">Х</span><div><h2>Хост</h2><p>ИИ-ведущий</p></div><b>СЛУЖЕБНОЕ</b></header><dl><div><dt>отношение:</dt><dd>{hostRelation ? relationshipLabel(hostRelation.trust, hostRelation.resentment) : 'доверенное'}</dd></div><div><dt>последний контакт:</dt><dd>{hostMessage ? `${formatDate(hostMessage.createdAt)} · ${formatTime(hostMessage.createdAt)}` : 'ещё не было'}</dd></div><div><dt>роль:</dt><dd>Ведёт разговор и объясняет канон; деньги, время, права и последствия считает сервер.</dd></div></dl></article></div>}
+      {tab === 'events' && <div className="dossier-card-stack dossier-event-stack">{state.world.events.map((event, index) => <article className={`dossier-index-card tone-${index % 2 ? 'amber' : 'coral'}`} key={event.id}><span className="dossier-side-tab"/><header><span className="dossier-initial">{index + 1}</span><div><h2>{event.title}</h2><p>{event.scope}</p></div><b>ПУБЛИЧНО</b></header><dl><div><dt>когда:</dt><dd>{formatDate(event.happenedAt)} · {formatTime(event.happenedAt)}</dd></div><div><dt>что известно:</dt><dd>{event.summary}</dd></div></dl></article>)}{!state.world.events.length && <div className="game-empty"><strong>Новых известных событий нет</strong><p>Секретные события не попадают сюда, пока персонаж о них не узнает.</p></div>}</div>}
+      {tab === 'relations' && <div className="dossier-card-stack dossier-relations-stack">{state.profile.relationships.map((relation, index) => <article className={`dossier-index-card tone-${['lime', 'coral', 'violet', 'amber'][index % 4]}`} key={relation.id}><span className="dossier-side-tab"/><header><span className="dossier-initial">{relation.name.slice(0, 1)}</span><div><h2>{relation.name}</h2><p>{relationshipLabel(relation.trust, relation.resentment)}</p></div><b>ЛИЧНОЕ</b></header><div className="dossier-relation-metrics"><span>доверие <b>{relation.trust}</b></span><span>уважение <b>{relation.respect}</b></span><span>тепло <b>{relation.affection}</b></span><span>обида <b>{relation.resentment}</b></span></div></article>)}</div>}
+    </div>
+    <footer className="dossier-connection-slip"><strong>СОСТОЯНИЕ<br/>СВЯЗЕЙ</strong><div>{state.profile.relationships.slice(0, 2).map((relation, index) => <span key={relation.id}><i className={index ? 'violet' : ''}/>{relation.name}: доверие {relation.trust}</span>)}</div><b>↗</b></footer><button className="dossier-open-history" onClick={onOpenHistory}>ОТКРЫТЬ ИСТОРИЮ</button>
+  </section></div>;
 }
+
+function InboxPanel({ notifications, busy, onClose, onAction }: { notifications: NotificationState[]; busy: string | null; onClose: () => void; onAction: (id: string, action: string, reply?: string) => void }) {
+  const [replying, setReplying] = useState<string | null>(null); const [reply, setReply] = useState('');
+  return <div className="inbox-backdrop" onMouseDown={onClose}><aside className="inbox-panel" onMouseDown={(event) => event.stopPropagation()}><header><div><small>ВХОДЯЩИЕ</small><h2>Уведомления</h2></div><button onClick={onClose}>×</button></header><div className="inbox-list">{notifications.map((item) => <article className={`inbox-item status-${item.status}`} key={item.id}><div className="inbox-meta"><span>{item.senderName}</span><time>{formatDate(item.createdAt)} · {formatTime(item.createdAt)}</time></div><h3>{item.title}</h3><p>{item.body}</p>{item.status === 'unread' && <button className="text-action" onClick={() => onAction(item.id, 'read')}>Отметить прочитанным</button>}<div className="inbox-actions">{item.canAccept && item.status === 'unread' && <><button disabled={busy === item.id} onClick={() => onAction(item.id, 'accept')}>Принять</button><button disabled={busy === item.id} onClick={() => onAction(item.id, 'decline')}>Отклонить</button></>}{item.canReply && !['declined', 'accepted'].includes(item.status) && <button onClick={() => setReplying(replying === item.id ? null : item.id)}>Ответить</button>}</div>{replying === item.id && <form onSubmit={(event) => { event.preventDefault(); if (reply.trim()) { onAction(item.id, 'reply', reply); setReply(''); setReplying(null); } }}><textarea value={reply} onChange={(event) => setReply(event.target.value)} maxLength={500} placeholder="Написать ответ…"/><button>Отправить</button></form>}</article>)}{!notifications.length && <div className="game-empty"><strong>Входящих нет</strong><p>Сообщения NPC, предложения игроков и важные события появятся здесь.</p></div>}</div></aside></div>;
+}
+
 export default function GameApp() {
-  const [state, setState] = useState<GameState | null>(null);
-  const [view, setView] = useState<View>('dossier');
-  const [dossierTab, setDossierTab] = useState<DossierTab>('people');
-  const [profilePage, setProfilePage] = useState<ProfilePage>('character');
-  const [hostIntent, setHostIntent] = useState('');
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [now, setNow] = useState(0);
-  const [showRoutineForm, setShowRoutineForm] = useState(false);
-  const [confirmRoutine, setConfirmRoutine] = useState<string | null>(null);
-
-  const load = useCallback(async (quiet = false) => {
-    if (!quiet) setBusy('load');
-    try {
-      const response = await fetch('/api/state', { cache: 'no-store' });
-      const data = await response.json() as GameState | ApiError;
-      if (!response.ok) throw new Error((data as ApiError).error);
-      setState(data as GameState);
-      setError(null);
-    } catch (reason) {
-      setError(readableRequestError(reason, 'Мир временно недоступен'));
-    } finally {
-      if (!quiet) setBusy(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    const start = window.setTimeout(() => void load(), 0);
-    const clock = window.setInterval(() => setNow(Date.now()), 1000);
-    const sync = window.setInterval(() => void load(true), 10_000);
-    return () => {
-      window.clearTimeout(start);
-      window.clearInterval(clock);
-      window.clearInterval(sync);
-    };
-  }, [load]);
-
-  useEffect(() => {
-    if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(null), 3800);
-    return () => window.clearTimeout(timer);
-  }, [notice]);
-
-  const request = useCallback(async (path: string, init: RequestInit, key: string, success: string) => {
-    setBusy(key);
-    setError(null);
-    try {
-      const response = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
-      const data = await response.json() as GameState | ApiError;
-      if (!response.ok) throw new Error((data as ApiError).error);
-      setState(data as GameState);
-      setNotice(success);
-      return true;
-    } catch (reason) {
-      setError(readableRequestError(reason, 'Команда не выполнена'));
-      return false;
-    } finally {
-      setBusy(null);
-    }
-  }, []);
-
-  const propose = useCallback(async (kind?: ActionKind, intent?: string, targetLocationId?: string) => {
-    const ok = await request('/api/actions', { method: 'POST', body: JSON.stringify({ kind, intent: intent ?? hostIntent, targetLocationId }) }, 'proposal', 'Хост подготовил карточку решения.');
-    if (ok) {
-      setHostIntent('');
-      setView('host');
-    }
-  }, [hostIntent, request]);
-
-  const confirmAction = useCallback((id: string) => void request(`/api/actions/${id}/confirm`, { method: 'POST' }, id, 'Действие началось. Мир запомнил решение.'), [request]);
-  const cancelAction = useCallback((id: string) => void request(`/api/actions/${id}/cancel`, { method: 'POST' }, id, 'Карточка убрана без списаний.'), [request]);
-  const mutateRoutine = useCallback((id: string, mutation: 'skip' | 'pause' | 'resume' | 'cancel') => {
-    void request(`/api/routines/${id}`, { method: 'PATCH', body: JSON.stringify({ mutation }) }, id, 'Ритуал изменён.');
-    if (mutation === 'cancel') setConfirmRoutine(null);
-  }, [request]);
-
-  const running = useMemo(() => state?.actions.filter((action) => action.status === 'running') ?? [], [state]);
-  const awaiting = useMemo(() => state?.actions.filter((action) => action.status === 'awaiting_confirmation') ?? [], [state]);
-  const finished = useMemo(() => state?.actions.filter((action) => action.status === 'resolved') ?? [], [state]);
-  async function submitHost(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (hostIntent.trim()) await propose(undefined, hostIntent);
-  }
-
-  async function submitRoutine(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    const ok = await request('/api/routines', {
-      method: 'POST',
-      body: JSON.stringify({ title: form.get('title'), scheduleLabel: form.get('schedule'), durationMinutes: Number(form.get('duration')) }),
-    }, 'routine-create', 'Новый ритуал появился на игровом поле.');
-    if (ok) {
-      formElement.reset();
-      setShowRoutineForm(false);
-    }
-  }
-
-  if (!state) {
-    return <main className="world-loading"><span>Б</span><strong>Ташкент просыпается…</strong><p>{error ?? 'Загружаем живой мир'}</p>{error && <button onClick={() => void load()}>Повторить</button>}</main>;
-  }
-
-  const clockNow = now || new Date(state.serverTime).getTime();
-
-  return (
-    <main className={`bumbars-game view-${view}`}>
-      <div className="world-backdrop" />
-      <div className="world-vignette" />
-
-      <header className="persistent-hud">
-        <button className="player-plaque" onClick={() => { setView('profile'); setProfilePage('character'); }}>
-          <span>А</span><div><small>ИГРОК</small><strong>{state.player.name}</strong><em>{state.player.role}</em></div>
-        </button>
-        <div className="resource-plaque">
-          <button onClick={() => { setView('profile'); setProfilePage('finance'); }}><span className="res-coin">●</span><small>кошелёк</small><strong>{formatMoney(state.wallet.balanceCents)}</strong></button>
-          <div><span className="res-energy">ϟ</span><small>энергия</small><strong>{state.player.energy}</strong></div>
-          <div><span className="res-health">♥</span><small>здоровье</small><strong>{state.player.health}</strong></div>
-        </div>
-        <button className="day-plaque" onClick={() => void load()} disabled={busy === 'load'}><small>ДЕНЬ {dayNumber(state.serverTime)}</small><strong>{formatTime(state.serverTime)}</strong><em>Ташкент · обновить</em></button>
-      </header>
-
-      <section className="game-canvas">
-        {view === 'host' && (
-          <div className="host-screen game-screen-panel">
-            <div className="host-stage">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/host-character.png" alt="Хост — игровой ведущий Bumbars" />
-              <div className="host-shadow" />
-              <div className="host-nameplate"><small>ИИ-ВЕДУЩИЙ</small><strong>Хост</strong><span>понимает намерение · сервер считает последствия</span></div>
-            </div>
-            <section className="host-dialogue">
-              <div className="dialogue-heading"><div><small>ЖУРНАЛ РЕШЕНИЙ</small><h1>Что будем делать?</h1></div><span className="host-online">● на связи</span></div>
-              <div className="host-history">{state.hostMessages.map((message) => <article className={message.role} key={message.id}><small>{message.role === 'host' ? 'ХОСТ' : state.player.name.toUpperCase()}</small><p>{message.body}</p><time>{formatTime(message.createdAt)}</time></article>)}</div>
-              <form className="host-command" onSubmit={submitHost}><label htmlFor="host-intent">Я хочу…</label><div><input id="host-intent" value={hostIntent} onChange={(event) => setHostIntent(event.target.value)} maxLength={280} placeholder="например, позаниматься экономикой вечером"/><button disabled={!hostIntent.trim() || busy === 'proposal'}>Рассчитать →</button></div></form>
-              <div className="suggestion-cards">{PROMPTS.map((prompt) => <button key={prompt} onClick={() => setHostIntent(prompt)}>{prompt}</button>)}</div>
-              <div className="host-cards"><div className="subheading"><h2>Карточки выбора</h2><span>{awaiting.length}</span></div>{awaiting.length ? awaiting.map((action) => <GameActionCard key={action.id} action={action} now={clockNow} busy={busy} onConfirm={confirmAction} onCancel={cancelAction} />) : <div className="game-empty"><strong>Колода пуста</strong><p>Опиши намерение. Хост не запустит ничего без твоего решения.</p></div>}</div>
-            </section>
-          </div>
-        )}
-
-        {view === 'plan' && (
-          <div className="plan-screen game-screen-panel">
-            <header className="screen-title"><div><small>ЛИЧНЫЙ ПУТЕВОЙ ЖУРНАЛ</small><h1>Сегодняшний путь</h1><p>Алекс может быть занят, но ты всегда можешь планировать следующий ход.</p></div><button className="add-routine" onClick={() => setShowRoutineForm((value) => !value)}>+ Новый ритуал</button></header>
-            {showRoutineForm && <form className="ritual-maker" onSubmit={submitRoutine}><div><label htmlFor="ritual-title">Ритуал</label><input id="ritual-title" name="title" required minLength={2} maxLength={60} placeholder="Вечерняя прогулка"/></div><div><label htmlFor="ritual-schedule">Когда</label><input id="ritual-schedule" name="schedule" required minLength={3} maxLength={80} placeholder="Каждый день · 20:00"/></div><div><label htmlFor="ritual-duration">Минут</label><input id="ritual-duration" name="duration" type="number" required min={5} max={180} defaultValue={30}/></div><button disabled={busy === 'routine-create'}>Добавить на поле</button></form>}
-            <div className="open-journal">
-              <section className="journal-page today-page"><div className="page-tab">ДЕЙСТВИЯ</div><div className="page-heading"><span>{running.length + awaiting.length}</span><h2>В дороге</h2></div><div className="path-line" />{[...running, ...awaiting].length ? [...running, ...awaiting].map((action, index) => <div className="path-stop" key={action.id}><span>{index + 1}</span><GameActionCard action={action} now={clockNow} busy={busy} onConfirm={confirmAction} onCancel={cancelAction} compact /></div>) : <div className="game-empty"><strong>Путь свободен</strong><p>Выбери маршрут в досье или поговори с Хостом.</p></div>}<div className="page-heading resolved-heading"><span>{finished.length}</span><h2>Следы опыта</h2></div>{finished.slice(0, 3).map((action) => <GameActionCard key={action.id} action={action} now={clockNow} busy={busy} onConfirm={confirmAction} onCancel={cancelAction} compact />)}</section>
-              <section className="journal-page routine-page"><div className="page-tab">РИТУАЛЫ</div><div className="page-heading"><span>{state.routines.length}</span><h2>Повторяющийся маршрут</h2></div><div className="routine-stack">{state.routines.map((routine) => <RoutineToken key={routine.id} routine={routine} busy={busy} confirming={confirmRoutine === routine.id} onMutate={mutateRoutine} onConfirmCancel={setConfirmRoutine}/>)}</div></section>
-            </div>
-          </div>
-        )}
-
-        {view === 'dossier' && <DossierScreen state={state} tab={dossierTab} busy={busy === 'proposal'} onTab={setDossierTab} onTravel={(locationId, locationName) => void propose('travel', `поехать в ${locationName}`, locationId)} onOpenHistory={() => { setProfilePage('biography'); setView('profile'); }} />}
-
-        {view === 'profile' && (
-          <div className="profile-screen game-screen-panel">
-            <header className="character-header"><div className="character-avatar">А<span /></div><div><small>ЛИСТ ПЕРСОНАЖА</small><h1>{state.player.name}</h1><p>{state.player.role} · {state.player.city}</p></div><div className="reputation-medal"><span>{state.player.reputation}</span><small>репутация</small></div></header>
-            <div className="sheet-tabs"><button className={profilePage === 'character' ? 'active' : ''} onClick={() => setProfilePage('character')}>Персонаж</button><button className={profilePage === 'career' ? 'active' : ''} onClick={() => setProfilePage('career')}>Карьера</button><button className={profilePage === 'skills' ? 'active' : ''} onClick={() => setProfilePage('skills')}>Навыки</button><button className={profilePage === 'assets' ? 'active' : ''} onClick={() => setProfilePage('assets')}>Активы</button><button className={profilePage === 'relations' ? 'active' : ''} onClick={() => setProfilePage('relations')}>Связи</button><button className={profilePage === 'biography' ? 'active' : ''} onClick={() => setProfilePage('biography')}>История</button><button className={profilePage === 'finance' ? 'active' : ''} onClick={() => setProfilePage('finance')}>Кошелёк</button></div>
-            <ProfileContent state={state} page={profilePage} finished={finished} />
-          </div>
-        )}
-      </section>
-
-      <nav className="game-dock" aria-label="Главная навигация">{NAV.map((item) => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><span>{item.glyph}</span><strong>{item.label}</strong></button>)}</nav>
-      {notice && <div className="game-toast success">✓ {notice}</div>}
-      {error && <div className="game-toast error">{error}<button onClick={() => setError(null)}>×</button></div>}
-    </main>
-  );
+  const [state, setState] = useState<GameState | null>(null); const [view, setView] = useState<View>('host'); const [dossierTab, setDossierTab] = useState<DossierTab>('people'); const [profilePage, setProfilePage] = useState<ProfilePage>('character');
+  const [message, setMessage] = useState(''); const [busy, setBusy] = useState<string | null>(null); const [error, setError] = useState<string | null>(null); const [notice, setNotice] = useState<string | null>(null); const [now, setNow] = useState(0); const [showInbox, setShowInbox] = useState(false); const [editingProfile, setEditingProfile] = useState(false); const historyRef = useRef<HTMLDivElement>(null);
+  const load = useCallback(async (quiet = false) => { if (!quiet) setBusy('load'); try { const response = await fetch('/api/state', { cache: 'no-store' }); const data = await response.json() as GameState | ApiError; if (!response.ok) throw new Error((data as ApiError).error); setState(data as GameState); setError(null); } catch (reason) { setError(readableRequestError(reason, 'Мир временно недоступен')); } finally { if (!quiet) setBusy(null); } }, []);
+  useEffect(() => { const start = window.setTimeout(() => void load(), 0); const clock = window.setInterval(() => setNow(Date.now()), 1000); const sync = window.setInterval(() => void load(true), 10_000); return () => { window.clearTimeout(start); window.clearInterval(clock); window.clearInterval(sync); }; }, [load]);
+  useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(null), 3800); return () => window.clearTimeout(timer); }, [notice]);
+  useEffect(() => { if (view === 'host') historyRef.current?.scrollTo({ top: historyRef.current.scrollHeight, behavior: 'smooth' }); }, [view, state?.hostMessages.length]);
+  const request = useCallback(async (path: string, init: RequestInit, key: string, success?: string) => { setBusy(key); setError(null); try { const response = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) } }); const data = await response.json() as GameState | ApiError; if (!response.ok) throw new Error((data as ApiError).error); setState(data as GameState); if (success) setNotice(success); return true; } catch (reason) { setError(readableRequestError(reason, 'Команда не выполнена')); return false; } finally { setBusy(null); } }, []);
+  const confirmAction = useCallback((id: string) => void request(`/api/actions/${id}/confirm`, { method: 'POST' }, id, 'Решение подтверждено.'), [request]); const cancelAction = useCallback((id: string) => void request(`/api/actions/${id}/cancel`, { method: 'POST' }, id, 'Предложение отклонено без изменений.'), [request]);
+  const notificationAction = useCallback((id: string, action: string, reply?: string) => void request(`/api/notifications/${id}`, { method: 'POST', body: JSON.stringify({ action, reply }) }, id, action === 'reply' ? 'Ответ сохранён.' : 'Решение сохранено.'), [request]);
+  const actionMap = useMemo(() => new Map(state?.actions.map((action) => [action.id, action]) ?? []), [state]); const running = useMemo(() => state?.actions.filter((action) => action.status === 'running') ?? [], [state]); const awaiting = useMemo(() => state?.actions.filter((action) => action.status === 'awaiting_confirmation') ?? [], [state]); const finished = useMemo(() => state?.actions.filter((action) => action.status === 'resolved') ?? [], [state]);
+  async function submitHost(event: FormEvent) { event.preventDefault(); const text = message.trim(); if (!text) return; const ok = await request('/api/host/messages', { method: 'POST', body: JSON.stringify({ message: text }) }, 'host-send'); if (ok) setMessage(''); }
+  function composerKey(event: KeyboardEvent<HTMLTextAreaElement>) { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }
+  if (!state) return <main className="world-loading"><span>Б</span><strong>Ташкент просыпается…</strong><p>{error ?? 'Загружаем живой мир'}</p>{error && <button onClick={() => void load()}>Повторить</button>}</main>;
+  const clockNow = now || new Date(state.serverTime).getTime(); const unread = state.notifications.filter((item) => item.status === 'unread').length;
+  return <main className={`bumbars-game view-${view}`}><div className="world-backdrop"/><div className="world-vignette"/>
+    <header className="persistent-hud"><button className="player-plaque" onClick={() => { setView('profile'); setProfilePage('character'); }}><span>{state.player.name.slice(0, 1).toUpperCase()}</span><div><small>ИГРОК</small><strong>{state.player.name}</strong><em>{state.player.role}</em></div></button><div className="resource-plaque"><button onClick={() => { setView('profile'); setProfilePage('finance'); }}><span className="res-coin">●</span><small>кошелёк</small><strong>{formatMoney(state.wallet.availableCents)}</strong></button><div><span className="res-energy">ϟ</span><small>энергия</small><strong>{state.player.energy}</strong></div><div><span className="res-health">♥</span><small>здоровье</small><strong>{state.player.health}</strong></div></div><button className="inbox-bell" onClick={() => setShowInbox(true)} aria-label={`Уведомления: ${unread} непрочитанных`}><span>♢</span>{unread > 0 && <b>{unread}</b>}</button><button className="day-plaque" onClick={() => void load()} disabled={busy === 'load'}><small>ДЕНЬ {dayNumber(state.serverTime)}</small><strong>{formatTime(state.serverTime)}</strong><em>Ташкент · обновить</em></button></header>
+    <section className="game-canvas">
+      {view === 'host' && <div className="host-screen game-screen-panel"><div className="host-stage"><Image src="/host-character.png" alt="Хост — игровой ведущий Bumbars" width={620} height={840} priority/><div className="host-shadow"/><div className="host-nameplate"><small>ИИ-ВЕДУЩИЙ</small><strong>Хост</strong><span>разговаривает · сервер считает последствия</span></div></div><section className="host-dialogue"><div className="dialogue-heading"><div><small>ЕДИНЫЙ РАЗГОВОР</small><h1>Хост на связи</h1></div><span className="host-online">● на связи</span></div><div className="host-history telegram-history" ref={historyRef}>{state.hostMessages.map((chat) => { const linked = chat.actionId ? actionMap.get(chat.actionId) : null; return <div className={`chat-turn ${chat.role}`} key={chat.id}><article><small>{chat.role === 'host' ? 'ХОСТ' : state.player.name.toUpperCase()}</small><p>{chat.body}</p><time>{formatTime(chat.createdAt)}</time></article>{linked && <GameActionCard action={linked} now={clockNow} busy={busy} onConfirm={confirmAction} onCancel={cancelAction}/>}</div>; })}</div><form className="host-composer" onSubmit={submitHost}><textarea aria-label="Сообщение Хосту" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={composerKey} maxLength={1500} rows={1} placeholder="Спроси, обсуди или предложи действие…"/><button aria-label="Отправить" disabled={!message.trim() || busy === 'host-send'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.2 20.2 3c.7-.3 1.4.4 1.1 1.1l-8.2 17.2c-.3.7-1.3.6-1.5-.1l-1.5-6-6-1.5c-.8-.2-.9-1.2-.1-1.5Zm7.5 2.2 6.3-6.3-8.2 5 1.9 1.3Z"/></svg></button></form></section></div>}
+      {view === 'dossier' && <DossierScreen state={state} tab={dossierTab} onTab={setDossierTab} onOpenHistory={() => { setProfilePage('biography'); setView('profile'); }}/>}
+      {view === 'plan' && <div className="plan-screen game-screen-panel"><header className="screen-title"><div><small>СЕГОДНЯ · ASIA/TASHKENT</small><h1>План на день</h1><p>Расписание составляет Хост с учётом занятости. Повторяющиеся правила хранятся в базе и не загромождают экран.</p></div><button className="open-host" onClick={() => setView('host')}>Обсудить с Хостом</button></header><section className="today-board"><div className="today-column"><div className="page-heading"><span>{state.dailyPlan.length + awaiting.length}</span><h2>Сегодня</h2></div>{state.dailyPlan.map((item, index) => <article className={`plan-item status-${item.status}`} key={item.id}><span>{String(index + 1).padStart(2, '0')}</span><div><small>{item.scheduledFor ? `${formatTime(item.scheduledFor)} · ${item.startCondition}` : item.startCondition}</small><h3>{item.title}</h3><p>{item.details}</p></div><b>{item.status === 'running' ? 'выполняется' : item.status === 'completed' ? 'готово' : item.status === 'blocked' ? 'заблокировано' : 'запланировано'}</b></article>)}{!state.dailyPlan.length && <div className="game-empty"><strong>План пока свободен</strong><p>Напиши Хосту, что хочешь сделать сегодня или после текущего действия.</p></div>}{awaiting.map((action) => <GameActionCard key={action.id} action={action} now={clockNow} busy={busy} onConfirm={confirmAction} onCancel={cancelAction} compact/>)}</div><aside className="today-status"><small>СЕЙЧАС</small>{running.length ? running.map((action) => <GameActionCard key={action.id} action={action} now={clockNow} busy={busy} onConfirm={confirmAction} onCancel={cancelAction} compact/>) : <p>Персонаж свободен.</p>}<small>ПОСЛЕДНИЕ РЕЗУЛЬТАТЫ</small>{finished.slice(0, 4).map((action) => <article key={action.id}><strong>{action.title}</strong><span>{action.resultGrade ?? 'завершено'}</span></article>)}</aside></section></div>}
+      {view === 'profile' && <div className="profile-screen game-screen-panel"><header className="character-header"><div className="character-avatar">{state.player.name.slice(0, 1).toUpperCase()}<span/></div><div><small>ЛИСТ ПЕРСОНАЖА</small><h1>{state.player.name}</h1><p>{state.player.age ? `${state.player.age} лет · ` : ''}{state.player.role} · {state.player.city}</p></div><button className="profile-settings" onClick={() => { setProfilePage('character'); setEditingProfile(true); }}>⚙<small>настроить</small></button></header><div className="sheet-tabs"><button className={profilePage === 'character' ? 'active' : ''} onClick={() => setProfilePage('character')}>Персонаж</button><button className={profilePage === 'career' ? 'active' : ''} onClick={() => setProfilePage('career')}>Карьера</button><button className={profilePage === 'skills' ? 'active' : ''} onClick={() => setProfilePage('skills')}>Навыки</button><button className={profilePage === 'assets' ? 'active' : ''} onClick={() => setProfilePage('assets')}>Активы</button><button className={profilePage === 'relations' ? 'active' : ''} onClick={() => setProfilePage('relations')}>Связи</button><button className={profilePage === 'biography' ? 'active' : ''} onClick={() => setProfilePage('biography')}>История</button><button className={profilePage === 'finance' ? 'active' : ''} onClick={() => setProfilePage('finance')}>Кошелёк</button></div><ProfileContent state={state} page={profilePage} finished={finished} editing={editingProfile} onEdit={setEditingProfile}/></div>}
+    </section>
+    <nav className="game-dock">{NAV.map((item) => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><span>{item.glyph}</span><strong>{item.label}</strong></button>)}</nav>{showInbox && <InboxPanel notifications={state.notifications} busy={busy} onClose={() => setShowInbox(false)} onAction={notificationAction}/>} {notice && <div className="game-toast success">✓ {notice}</div>}{error && <div className="game-toast error">{error}<button onClick={() => setError(null)}>×</button></div>}
+  </main>;
 }

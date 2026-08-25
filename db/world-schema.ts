@@ -272,7 +272,89 @@ export const WORLD_SCHEMA_STATEMENTS = [
     body TEXT NOT NULL,
     created_at TEXT NOT NULL
   )`,
-  `CREATE INDEX IF NOT EXISTS idx_experience_character_time
+  `CREATE TABLE IF NOT EXISTS app_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS player_settings (
+    player_id TEXT PRIMARY KEY REFERENCES players(id),
+    age INTEGER CHECK (age IS NULL OR age BETWEEN 14 AND 120),
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS character_conditions (
+    character_id TEXT PRIMARY KEY REFERENCES characters(id),
+    strength INTEGER NOT NULL CHECK (strength BETWEEN 0 AND 100),
+    intelligence INTEGER NOT NULL CHECK (intelligence BETWEEN 0 AND 100),
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS action_effects (
+    action_id TEXT PRIMARY KEY REFERENCES actions(id),
+    resolution_mode TEXT NOT NULL,
+    energy_delta INTEGER NOT NULL DEFAULT 0,
+    health_delta INTEGER NOT NULL DEFAULT 0,
+    strength_delta INTEGER NOT NULL DEFAULT 0,
+    intelligence_delta INTEGER NOT NULL DEFAULT 0,
+    morale_delta INTEGER NOT NULL DEFAULT 0,
+    confidence_delta INTEGER NOT NULL DEFAULT 0,
+    fatigue_delta INTEGER NOT NULL DEFAULT 0,
+    skill_name TEXT,
+    skill_domain TEXT,
+    summary TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS action_payloads (
+    action_id TEXT PRIMARY KEY REFERENCES actions(id),
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS chat_action_links (
+    message_id TEXT PRIMARY KEY REFERENCES chat_messages(id),
+    action_id TEXT NOT NULL REFERENCES actions(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS daily_plan_items (
+    id TEXT PRIMARY KEY,
+    player_id TEXT NOT NULL REFERENCES players(id),
+    action_id TEXT,
+    title TEXT NOT NULL,
+    details TEXT NOT NULL,
+    scheduled_for TEXT,
+    start_condition TEXT NOT NULL DEFAULT 'WHEN_FREE',
+    status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    player_id TEXT NOT NULL REFERENCES players(id),
+    sender_name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'unread',
+    can_accept INTEGER NOT NULL DEFAULT 0,
+    can_reply INTEGER NOT NULL DEFAULT 0,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS fund_reservations (
+    id TEXT PRIMARY KEY,
+    player_id TEXT NOT NULL REFERENCES players(id),
+    reference_type TEXT NOT NULL,
+    reference_id TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    released_at TEXT,
+    UNIQUE(reference_type, reference_id, player_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_player_time
+    ON daily_plan_items(player_id, scheduled_for, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_player_status
+    ON notifications(player_id, status, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_reservations_player_status
+    ON fund_reservations(player_id, status)`,  `CREATE INDEX IF NOT EXISTS idx_experience_character_time
     ON experience_events(character_id, occurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_assets_owner
     ON assets(owner_id, kind)`,

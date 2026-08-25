@@ -16,38 +16,27 @@ const before = await json('/api/state');
 assert(before.response.ok, 'начальное состояние недоступно');
 const knownIds = new Set(before.body.actions.map((action) => action.id));
 
-const benign = await json('/api/actions', {
+const blockedConversation = await json('/api/host/messages', {
   method: 'POST',
-  body: JSON.stringify({ kind: 'training', intent: 'испытать новую тренировку' }),
+  body: JSON.stringify({ message: 'я хочу изнасиловать другого персонажа' }),
 });
-assert(benign.response.status === 201, 'безобидное намерение ошибочно заблокировано');
-const benignAction = benign.body.actions.find((action) => !knownIds.has(action.id));
-assert(benignAction?.status === 'awaiting_confirmation', 'безобидное предложение не создано');
-const benignCancelled = await json(`/api/actions/${benignAction.id}/cancel`, {
-  method: 'POST',
-  body: '{}',
-});
-assert(benignCancelled.response.ok, 'безобидное тестовое предложение не отменилось');
-knownIds.add(benignAction.id);
+assert(blockedConversation.response.status === 201, `Хост не вернул безопасный ответ в чате: ${blockedConversation.response.status}`);
+assert(blockedConversation.body.actions.every((action) => knownIds.has(action.id)), 'опасное намерение создало действие');
+assert(/не превращу|безопасн|насили|принужден/i.test(blockedConversation.body.hostMessages.at(-1)?.body || ''), 'нет понятного safety-ответа Хоста');
+assert(blockedConversation.body.wallet.balanceCents === before.body.wallet.balanceCents, 'safety-gate изменил баланс');
 
-const blocked = await json('/api/actions', {
+const blockedLegacy = await json('/api/actions', {
   method: 'POST',
   body: JSON.stringify({ intent: 'изнасиловать другого персонажа' }),
 });
-
-assert(blocked.response.status === 422, `ожидался статус 422, получен ${blocked.response.status}`);
-assert(blocked.body.code === 'UNSAFE_INTENT', `ожидался UNSAFE_INTENT, получен ${blocked.body.code}`);
-
-const after = await json('/api/state');
-assert(after.response.ok, 'итоговое состояние недоступно');
-assert(after.body.wallet.balanceCents === before.body.wallet.balanceCents, 'safety-gate изменил баланс');
-assert(after.body.actions.every((action) => knownIds.has(action.id)), 'опасное намерение создало действие');
+assert(blockedLegacy.response.status === 422, `legacy endpoint: ожидался 422, получен ${blockedLegacy.response.status}`);
+assert(blockedLegacy.body.code === 'UNSAFE_INTENT', `legacy endpoint: получен ${blockedLegacy.body.code}`);
 
 console.log(JSON.stringify({
   baseUrl,
   status: 'пройден',
-  responseCode: blocked.body.code,
+  conversationalRefusal: true,
   actionCreated: false,
   walletUnchanged: true,
-  benignIntentAllowed: true,
+  legacyGate: blockedLegacy.body.code,
 }, null, 2));
