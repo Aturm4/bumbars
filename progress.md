@@ -31,7 +31,8 @@
 - `npm run lint` — пройдено без предупреждений;
 - `npm run test:safety` — пройдено;
 - `npm run test:scenarios` — 14/14;
-- `npm run build` — production-сборка пройдена.
+- `npm run build` — production-сборка пройдена;
+- private Sites production deployment — успешно, owner-only access.
 
 ### Следующие production-фазы
 

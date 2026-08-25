@@ -81,4 +81,4 @@
 - [x] `npm run test:scenarios` — 14/14;
 - [x] `npm run build`;
 - [x] desktop/mobile headless Chrome QA;
-- [ ] private production deployment текущей версии.
+- [x] private production deployment текущей версии.
