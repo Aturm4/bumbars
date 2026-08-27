@@ -202,9 +202,10 @@ function parseDynamicSections(rows: Record<string, unknown>[]): DynamicSectionSt
     try {
       const data = JSON.parse(String(row.data_json)) as Record<string, unknown>;
       const visibility = data._visibility === 'public' || data._visibility === 'secret' ? data._visibility : 'private';
-      const fields = Object.entries(data).filter(([key, value]) => key !== '_visibility' && ['string', 'number', 'boolean'].includes(typeof value))
-        .map(([key, value]) => ({ key, label: key.replace(/_/g, ' '), value: value as string | number | boolean }));
-      return fields.length ? [{ id: String(row.id), title: String(row.name), visibility, fields }] : [];
+      const fields = Object.entries(data).filter(([key, value]) => !key.startsWith('_') && ['string', 'number', 'boolean'].includes(typeof value))
+        .map(([key, value]) => { const label = key.replace(/_/g, ' '); return { key, label: label.charAt(0).toLocaleUpperCase('ru-RU') + label.slice(1), value: value as string | number | boolean }; });
+      const title = typeof data._title === 'string' && data._title.trim() ? data._title.trim() : String(row.name);
+      return fields.length ? [{ id: String(row.id), title, visibility, fields }] : [];
     } catch {
       return [];
     }

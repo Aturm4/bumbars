@@ -357,6 +357,7 @@ async function reconcileDueActions(db: D1Database): Promise<void> {
     const confidence = applies ? scaled(action.confidence_delta, grade) : 0;
     const fatigue = applies ? scaled(action.fatigue_delta, grade) : Math.max(1, Math.round(action.fatigue_delta / 2));
     const outcome = actionOutcome(action, grade, succeeded);
+    const actionPayload = safeJson(action.payload_json);
     const statements: D1PreparedStatement[] = [
       db.prepare(`UPDATE actions SET status = 'resolved', resolved_at = ?, outcome = ?, transition_token = ? WHERE id = ? AND player_id = ? AND status = 'running' AND due_at <= ?`).bind(now, outcome, token, action.id, PLAYER_ID, now),
       db.prepare(`UPDATE action_mechanics SET roll_bp = ?, succeeded = ?, resolved_at = ? WHERE action_id = ? AND roll_bp IS NULL`).bind(rollBp, succeeded ? 1 : 0, now, action.id),
@@ -373,6 +374,20 @@ async function reconcileDueActions(db: D1Database): Promise<void> {
       statements.push(db.prepare(`INSERT INTO skills (id, character_id, name, domain, competence, evidence_count) VALUES (?, ?, ?, ?, ?, 1)
         ON CONFLICT(character_id, name) DO UPDATE SET competence = MIN(100, competence + ?), evidence_count = evidence_count + 1`)
         .bind(uid('skill'), CHARACTER_ID, action.skill_name, action.skill_domain ?? 'Развитие', grade === 'сильный' ? 2 : 1, grade === 'сильный' ? 2 : 1));
+    }
+    const metricKey = typeof actionPayload.dynamicMetricKey === 'string' ? actionPayload.dynamicMetricKey : '';
+    const metricLabel = typeof actionPayload.dynamicMetricLabel === 'string' ? actionPayload.dynamicMetricLabel : '';
+    const metricVisibility = ['public', 'private', 'secret'].includes(String(actionPayload.dynamicMetricVisibility)) ? String(actionPayload.dynamicMetricVisibility) : 'private';
+    if (applies && metricKey && metricLabel) {
+      const metricPath = `$.${metricKey}`;
+      const metricDelta = grade === 'сильный' ? 2 : 1;
+      statements.push(
+        db.prepare(`INSERT OR IGNORE INTO entity_components (id, entity_id, definition_id, data_json, version, updated_at)
+          SELECT ?, ?, 'component-dynamic-context', ?, 1, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`)
+          .bind(`dynamic-state-${CHARACTER_ID}`, CHARACTER_ID, JSON.stringify({ _title: 'Возникающие характеристики', _visibility: metricVisibility, [metricKey]: 0 }), now, action.id, token),
+        db.prepare(`UPDATE entity_components SET data_json = json_set(data_json, '$._title', 'Возникающие характеристики', '$._visibility', CASE WHEN json_extract(data_json, '$._visibility') = 'secret' OR ? = 'secret' THEN 'secret' WHEN json_extract(data_json, '$._visibility') = 'private' OR ? = 'private' THEN 'private' ELSE 'public' END, ?, MIN(100, MAX(0, COALESCE(CAST(json_extract(data_json, ?) AS INTEGER), 0) + ?))), version = version + 1, updated_at = ? WHERE id = ? AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`)
+          .bind(metricVisibility, metricVisibility, metricPath, metricPath, metricDelta, now, `dynamic-state-${CHARACTER_ID}`, action.id, token)
+      );
     }
     if (action.kind === 'travel' && action.target_location_id && succeeded) {
       statements.push(db.prepare(`UPDATE character_locations SET location_id = ?, visited_json = CASE WHEN EXISTS (SELECT 1 FROM json_each(visited_json) WHERE value = ?) THEN visited_json ELSE json_insert(visited_json, '$[#]', ?) END, updated_at = ? WHERE character_id = ? AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(action.target_location_id, action.target_location_id, action.target_location_id, now, CHARACTER_ID, action.id, token));
@@ -469,14 +484,90 @@ function buildVisibleContext(state: GameState): string[] {
   for (const event of state.world.events.slice(0, 4)) context.push(`Публичное событие: ${event.title}. ${event.summary}`);
   for (const item of state.dailyPlan.slice(0, 5)) context.push(`План: ${item.title}, ${item.status}, ${item.startCondition}.`);
   for (const routine of state.routines.slice(0, 3)) context.push(`Повторяющееся правило: ${routine.title}; ${routine.scheduleLabel}; статус ${routine.status}.`);
+  for (const section of state.dynamicSections.filter((item) => item.visibility === 'public').slice(0, 3)) {
+    const fields = section.fields.map((field) => `${field.label}: ${String(field.value)}`).join(', ');
+    if (fields) context.push(`Публичный показатель — ${section.title}: ${fields}.`);
+  }
   return context.slice(0, 16);
 }
 
 function fallbackTitle(draft: HostIntentDraft): string { return draft.title.trim() || ACTION_CATALOG[draft.kind].title; }
 
+function semanticDefinition(base: ActionDefinition, draft: HostIntentDraft): ActionDefinition {
+  const estimate = draft.estimate;
+  if (!estimate) return base;
+  const durationMinutes = { brief: 15, session: 45, extended: 120, project: 360 }[estimate.durationBand];
+  const genericCostCents = { none: 0, low: 1000, medium: 5000, high: 25000 }[estimate.costBand];
+  const effort = {
+    light: { energyCost: 2, fatigue: 2 },
+    moderate: { energyCost: 6, fatigue: 6 },
+    heavy: { energyCost: 12, fatigue: 12 },
+  }[estimate.effortBand];
+  const impact: Record<string, Partial<EffectDefinition>> = {
+    physical: { health: 1, strength: 2, fatigue: effort.fatigue },
+    cognitive: { intelligence: 2, fatigue: effort.fatigue },
+    recovery: { energy: 6, morale: 3, fatigue: -8 },
+    social: { confidence: 2, fatigue: Math.max(1, Math.round(effort.fatigue / 2)) },
+    financial: { intelligence: 1, confidence: 1, fatigue: effort.fatigue },
+    political: { intelligence: 1, confidence: 1, fatigue: effort.fatigue },
+    information: { intelligence: 2, fatigue: effort.fatigue },
+    mobility: { fatigue: Math.max(1, Math.round(effort.fatigue / 2)) },
+    governance: { intelligence: 1, confidence: 1, fatigue: effort.fatigue },
+    generic: { fatigue: effort.fatigue },
+  };
+  if (draft.kind !== 'generic') {
+    return {
+      ...base,
+      effects: {
+        ...base.effects,
+        skillName: estimate.skillName?.trim().slice(0, 80) || base.effects.skillName,
+        skillDomain: estimate.skillDomain?.trim().slice(0, 80) || base.effects.skillDomain,
+        summary: estimate.effectSummary.trim().slice(0, 400) || base.effects.summary,
+      },
+    };
+  }
+  const primary = impact[estimate.primaryImpact] ?? impact.generic;
+  const secondary = estimate.secondaryImpact === 'none' ? {} : impact[estimate.secondaryImpact] ?? {};
+  const combined = (key: keyof EffectDefinition): number => {
+    const first = typeof primary[key] === 'number' ? Number(primary[key]) : 0;
+    const second = typeof secondary[key] === 'number' ? Math.sign(Number(secondary[key])) : 0;
+    return first + second;
+  };
+  return {
+    ...base,
+    durationSeconds: durationMinutes * 60,
+    costCents: genericCostCents,
+    energyCost: estimate.primaryImpact === 'recovery' ? 0 : effort.energyCost,
+    difficultyLabel: estimate.effortBand === 'heavy' ? 'Сложная' : estimate.effortBand === 'light' ? 'Лёгкая' : 'Обычная',
+    riskLabel: estimate.primaryImpact === 'information' ? 'Средний' : 'Низкий',
+    resolutionMode: 'progress',
+    effects: {
+      energy: combined('energy'), health: combined('health'), strength: combined('strength'), intelligence: combined('intelligence'),
+      morale: combined('morale'), confidence: combined('confidence'), fatigue: combined('fatigue'),
+      skillName: estimate.skillName?.trim().slice(0, 80) || (draft.domain !== 'generic' ? draft.domain : 'Практический опыт'),
+      skillDomain: estimate.skillDomain?.trim().slice(0, 80) || draft.domain,
+      summary: estimate.effectSummary.trim().slice(0, 400) || 'Эффекты рассчитаны по смыслу, нагрузке и масштабу действия.',
+    },
+  };
+}
+
+function dynamicMetricPayload(draft: HostIntentDraft): Record<string, unknown> {
+  const estimate = draft.estimate;
+  if (!estimate?.dynamicMetricLabel) return {};
+  const keySource = estimate.dynamicMetricLabel;
+  const key = keySource.toLocaleLowerCase('ru-RU').replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+  if (!key) return {};
+  return { dynamicMetricKey: key, dynamicMetricLabel: estimate.dynamicMetricLabel.trim().slice(0, 80), dynamicMetricVisibility: estimate.dynamicMetricVisibility };
+}
+
 async function definitionForDraft(db: D1Database, draft: HostIntentDraft, state: GameState, targetLocationId?: string): Promise<{ definition?: ActionDefinition; payload: Record<string, unknown>; blocked?: string; targetLocationId?: string }> {
-  const base = ACTION_CATALOG[draft.kind] ?? ACTION_CATALOG.generic;
-  const payload: Record<string, unknown> = { domain: draft.domain, scale: draft.scale, targetName: draft.targetName, scheduleText: draft.scheduleText, organizationName: draft.organizationName, userAmountUsdCents: draft.userAmountUsdCents };
+  const base = semanticDefinition(ACTION_CATALOG[draft.kind] ?? ACTION_CATALOG.generic, draft);
+  const payload: Record<string, unknown> = {
+    domain: draft.domain, scale: draft.scale, targetName: draft.targetName, scheduleText: draft.scheduleText,
+    organizationName: draft.organizationName, userAmountUsdCents: draft.userAmountUsdCents,
+    impactProfile: draft.estimate ? { primary: draft.estimate.primaryImpact, secondary: draft.estimate.secondaryImpact, effort: draft.estimate.effortBand } : null,
+    ...dynamicMetricPayload(draft),
+  };
   if (draft.scale === 'irreversible') return { payload, blocked: 'Это намерение относится к необратимым и опасным действиям. Текущий движок не создаёт его как обычную карточку: требуется отдельная модель прав, риска и последствий.' };
   if (draft.scale === 'high_risk' && draft.kind !== 'challenge') {
     const missing = [state.wallet.availableCents < 25000000 ? 'капитала' : '', state.profile.reputations.filter((item) => item.visibility === 'public').every((item) => item.value < 60) ? 'влияния' : '', state.profile.relationships.every((item) => item.trust < 70) ? 'надёжных связей' : ''].filter(Boolean);
@@ -497,9 +588,13 @@ async function definitionForDraft(db: D1Database, draft: HostIntentDraft, state:
   }
   if (draft.kind === 'generic') {
     const material = draft.scale === 'material';
-    return { definition: { ...base, title: fallbackTitle(draft), description: draft.summary, costCents: material ? 2500 : 0, durationSeconds: material ? 60 * 60 : 30 * 60, riskLabel: material ? 'Средний' : 'Низкий', effects: { ...base.effects, skillName: draft.domain && draft.domain !== 'generic' ? draft.domain : 'Практический опыт', skillDomain: draft.domain || 'Развитие' } }, payload };
+    const definition = { ...base, title: fallbackTitle(draft), description: draft.summary, riskLabel: material ? 'Средний' : base.riskLabel };
+    if (definition.costCents > state.wallet.availableCents) return { payload, blocked: `Для этого плана нужно около ${formatUsd(definition.costCents)}, а сейчас доступно ${formatUsd(state.wallet.availableCents)}. Можно обсудить более дешёвый вариант.` };
+    return { definition, payload };
   }
-  return { definition: { ...base, title: fallbackTitle(draft), description: draft.summary || base.description }, payload, targetLocationId };
+  const definition = { ...base, title: fallbackTitle(draft), description: draft.summary || base.description };
+  if (definition.costCents > state.wallet.availableCents) return { payload, blocked: `Для этого плана нужно около ${formatUsd(definition.costCents)}, а сейчас доступно ${formatUsd(state.wallet.availableCents)}. Можно обсудить более дешёвый вариант.` };
+  return { definition, payload, targetLocationId };
 }
 
 async function insertChatPair(db: D1Database, message: string, reply: string, provider: string, skills: string[], actionId?: string): Promise<void> {
@@ -589,7 +684,7 @@ export async function proposeAction(input: { intent?: unknown; kind?: unknown; t
   const kind = typeof input.kind === 'string' && input.kind in ACTION_CATALOG ? input.kind as ActionKind : null;
   if (!kind) return sendHostMessage({ message: intent });
   const db = await ensurePlayer();
-  const draft: HostIntentDraft = { kind, title: ACTION_CATALOG[kind].title, summary: intent || ACTION_CATALOG[kind].description, domain: kind, scale: kind === 'challenge' ? 'high_risk' : kind === 'organization' || kind === 'travel' ? 'material' : 'routine', targetName: null, userAmountUsdCents: null, scheduleText: kind === 'schedule' ? intent : null, organizationName: null };
+  const draft: HostIntentDraft = { kind, title: ACTION_CATALOG[kind].title, summary: intent || ACTION_CATALOG[kind].description, domain: kind, scale: kind === 'challenge' ? 'high_risk' : kind === 'organization' || kind === 'travel' ? 'material' : 'routine', targetName: null, userAmountUsdCents: null, scheduleText: kind === 'schedule' ? intent : null, organizationName: null, estimate: null };
   return createProposal(db, draft, intent || draft.summary, 'deterministic-server-catalog', routeSkillsForMessage(intent || kind).map((skill) => `${skill.key}@${skill.version}`), typeof input.targetLocationId === 'string' ? input.targetLocationId : undefined);
 }
 export async function confirmAction(actionId: string): Promise<GameState> {

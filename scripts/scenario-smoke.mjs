@@ -56,12 +56,12 @@ await run(2, 'Свободный вопрос остаётся разговор�
   assert(state.wallet.balanceCents === before.wallet.balanceCents, 'разговор изменил деньги');
 });
 
-await run(3, 'Тренировка через Хоста: $18, эффекты и progress', async () => {
+await run(3, 'Тренировка через Хоста: реалистичная цена, эффекты и progress', async () => {
   const { before, state, action } = await sendHost('Давай начнём силовую тренировку.');
   try {
     assert(action?.kind === 'training', `получен kind=${action?.kind || 'нет действия'}`);
     assert(action.status === 'awaiting_confirmation', 'действие запущено без подтверждения');
-    assert(action.costCents === 1800, `цена тренировки ${action.costCents}`);
+    assert(action.costCents >= 0 && action.costCents <= 5000, `нереалистичная цена тренировки ${action.costCents}`);
     assert(action.resolutionMode === 'progress', 'тренировка использует бинарный провал');
     assert(action.effects.strength > 0 && action.effects.fatigue > 0, 'не показаны сила/усталость');
     assert(action.effects.skillName, 'не указан развиваемый навык');
@@ -150,6 +150,21 @@ await run(14, 'Деньги и резервы разделены', async () => {
   const state = await request('/api/state');
   assert(state.wallet.availableCents === state.wallet.balanceCents - state.wallet.reservedCents, 'доступный баланс рассчитан неверно');
   assert(state.ledger.length > 0, 'нет финансового журнала');
+});
+
+await run(15, 'Смысл действия определяет разные эффекты', async () => {
+  const political = await sendHost('Давай подготовлю выступление для встречи с жителями района и соберу их обратную связь.');
+  const learning = await sendHost('Давай изучу сложный модуль по системному дизайну и законспектирую выводы.');
+  try {
+    assert(political.action?.status === 'awaiting_confirmation', 'политическое действие не стало предложением');
+    assert(learning.action?.status === 'awaiting_confirmation', 'обучение не стало предложением');
+    assert(political.action.effects.skillName !== learning.action.effects.skillName, 'разные действия получили один шаблонный навык');
+    assert(learning.action.effects.intelligence > 0, 'обучение не развивает интеллект');
+    assert(political.action.effects.summary !== learning.action.effects.summary, 'разные действия получили одинаковое описание эффекта');
+  } finally {
+    await cancelIfNeeded(political.action);
+    await cancelIfNeeded(learning.action);
+  }
 });
 
 console.log(JSON.stringify({ baseUrl, passed: results.filter((item) => item.status === 'пройден').length, total: results.length, results }, null, 2));

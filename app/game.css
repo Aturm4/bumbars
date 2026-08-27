@@ -836,3 +836,74 @@ textarea:focus-visible { outline: 3px solid var(--game-cyan); outline-offset: 3p
   .view-host .host-composer textarea { min-width: 0; }
   .view-host .game-dock { width: calc(100vw - 16px) !important; max-width: calc(100vw - 16px); }
 }
+
+/* Dossier now shares the same game shell and paper UI as Host, Plan and Profile. */
+.view-dossier { padding: 14px; background: transparent; overflow: hidden; }
+.view-dossier .world-backdrop { inset: 0; background: url('/game-world.png') center 50% / cover no-repeat, #142326; filter: blur(5px) brightness(.42) saturate(.72); transform: scale(1.06); }
+.view-dossier .world-vignette { display: block; background: linear-gradient(90deg,rgba(3,7,9,.64),transparent 26%,transparent 74%,rgba(3,7,9,.55)),linear-gradient(0deg,rgba(3,7,9,.82),transparent 36%,rgba(3,7,9,.2)); }
+.view-dossier .game-canvas { width: min(1540px,100%); min-height: calc(100vh - 28px); margin: 0 auto; border: 5px solid #251a18; border-radius: 31px; box-shadow: inset 0 0 0 2px #805f45,0 25px 90px rgba(0,0,0,.65); background: transparent; overflow: hidden; }
+.view-dossier .persistent-hud { display: grid; grid-template-columns: 250px minmax(410px,660px) 58px 180px; }
+.view-dossier .persistent-hud > .player-plaque,.view-dossier .persistent-hud > .resource-plaque,.view-dossier .persistent-hud > .day-plaque { display: flex; }
+.view-dossier .persistent-hud > .resource-plaque { display: grid; }
+.view-dossier .inbox-bell { position: relative; right: auto; top: auto; display: block; }
+.view-dossier .game-dock { left: 50%; right: auto; bottom: 18px; width: min(590px,calc(100% - 32px)); min-height: 64px; padding: 7px; border: 3px solid var(--game-wood); border-radius: 21px; background: linear-gradient(#f4e7c5,#d1bd91); box-shadow: inset 0 0 0 2px rgba(255,255,255,.3),0 7px 0 rgba(30,18,15,.52),0 18px 35px rgba(0,0,0,.36); grid-template-columns: repeat(4,1fr); transform: translateX(-50%); }
+.view-dossier .game-dock button { min-height: auto; padding: 4px; border: 0; border-radius: 13px; color: #6d5f49; background: transparent; box-shadow: none; gap: 2px; }
+.view-dossier .game-dock button + button { border-left: 0; }
+.view-dossier .game-dock button span { font-size: 19px; }
+.view-dossier .game-dock button strong { color: inherit; font-size: 10px; letter-spacing: 0; }
+.view-dossier .game-dock button.active { color: #1d2d20; background: var(--game-lime); box-shadow: inset 0 -4px rgba(75,99,39,.18); }
+.view-dossier .game-dock button.active::after { display: none; }
+.dossier-screen { width: auto; max-width: none; min-height: calc(100vh - 38px); margin: 0; padding: 112px clamp(24px,4vw,60px) 104px; color: #f4ead2; overflow-y: auto; }
+.dossier-screen .screen-title { max-width: 1180px; margin: 0 auto 24px; }
+.dossier-panel { max-width: 1180px; margin: 0 auto; padding: 20px; border: 5px solid var(--game-wood); border-radius: 25px 14px 28px 18px; color: var(--game-ink); background: linear-gradient(120deg,#ecdeb9,#cbb583); box-shadow: inset 0 0 0 3px rgba(255,255,255,.2),0 20px 60px rgba(0,0,0,.45); }
+.dossier-panel .dossier-tabs { width: fit-content; max-width: 100%; margin: 0 auto 18px; padding: 4px; border: 3px solid var(--game-wood); border-radius: 13px; background: var(--game-paper); display: flex; box-shadow: none; transform: none; }
+.dossier-panel .dossier-tabs button { min-width: 145px; min-height: 38px; padding: 0 14px; border: 0; border-radius: 8px; color: #6c5d47; background: transparent; box-shadow: none; font-size: 12px; }
+.dossier-panel .dossier-tabs button + button::before { display: none; }
+.dossier-panel .dossier-tabs button.active { color: #1a291d; background: var(--game-lime); box-shadow: inset 0 -4px rgba(75,99,39,.18); }
+.dossier-file-body { min-height: 0; }
+.dossier-card-stack { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.dossier-index-card { min-width: 0; min-height: 0; padding: 17px; border: 3px solid var(--game-wood); border-radius: 12px 18px 11px 20px; background: #f1e2bd; box-shadow: 0 5px 0 rgba(73,44,32,.18); transform: none !important; }
+.dossier-index-card::before,.dossier-index-card::after,.dossier-side-tab { display: none !important; }
+.dossier-index-card > header { grid-template-columns: 50px minmax(0,1fr) auto; gap: 11px; }
+.dossier-initial { width: 48px; height: 48px; border: 3px solid var(--game-wood); border-radius: 15px; box-shadow: none; font-size: 23px; }
+.dossier-index-card header h2 { margin: 0; font-size: 22px; }
+.dossier-index-card header p { margin-top: 3px; font-size: 10px; }
+.dossier-index-card header > b { align-self: start; padding: 5px 7px; border: 1px solid #8e7959; border-radius: 6px; color: #6f5d45; background: rgba(255,255,255,.2); font-size: 8px; }
+.dossier-index-card dl { margin-top: 13px; font-size: 10px; }
+.dossier-index-card dl > div { grid-template-columns: 126px minmax(0,1fr); gap: 10px; padding: 8px 0; }
+.dossier-connection-slip { margin: 16px 0 0; padding: 13px; border: 3px solid var(--game-wood); border-radius: 12px; background: rgba(255,247,218,.34); box-shadow: none; transform: none; }
+
+/* The action mark participates in layout and can no longer cover long titles. */
+.game-action-card { padding: 16px; display: grid; grid-template-columns: 46px minmax(0,1fr); align-items: start; gap: 14px; }
+.action-seal { position: static; left: auto; top: auto; grid-column: 1; }
+.action-card-copy { grid-column: 2; min-width: 0; }
+.action-card-copy h3 { overflow-wrap: anywhere; }
+.game-action-card.compact { padding: 12px; grid-template-columns: 38px minmax(0,1fr); gap: 11px; }
+.game-action-card.compact .action-seal { position: static; left: auto; top: auto; }
+.action-benefits > div { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; }
+.action-benefits > div span { padding: 4px 6px; border: 1px solid #8a7657; border-radius: 6px; background: rgba(255,255,255,.2); font-size: 8px; font-weight: 900; }
+
+@media (max-width: 1180px) {
+  .view-dossier .persistent-hud { grid-template-columns: 220px 1fr 56px; }
+  .view-dossier .day-plaque { display: none !important; }
+}
+@media (max-width: 760px) {
+  .view-dossier { padding: 0; }
+  .view-dossier .game-canvas { width: 100%; max-width: 100vw; min-height: 100vh; border: 0; border-radius: 0; }
+  .view-dossier .persistent-hud { display: block; left: 0; right: 0; width: 100vw; }
+  .view-dossier .persistent-hud .player-plaque,.view-dossier .persistent-hud .day-plaque { display: none !important; }
+  .view-dossier .persistent-hud .resource-plaque { position: fixed; left: 8px; right: auto; top: 8px; width: calc(100vw - 76px); }
+  .view-dossier .inbox-bell { position: fixed; right: 8px; top: 8px; }
+  .view-dossier .game-dock { left: 8px; right: 8px; bottom: 8px; width: auto; transform: none; }
+  .dossier-screen { min-height: 100vh; padding: 82px 14px 92px; }
+  .dossier-panel { padding: 12px; border-width: 4px; }
+  .dossier-panel .dossier-tabs { width: 100%; overflow-x: auto; justify-content: flex-start; }
+  .dossier-panel .dossier-tabs button { min-width: 105px; }
+  .dossier-card-stack { grid-template-columns: 1fr; }
+}
+@media (max-width: 430px) {
+  .game-action-card,.game-action-card.compact { padding: 12px; }
+  .dossier-index-card > header { grid-template-columns: 42px minmax(0,1fr); }
+  .dossier-index-card header > b { grid-column: 2; justify-self: start; }
+  .dossier-index-card dl > div { grid-template-columns: 1fr; gap: 3px; }
+}

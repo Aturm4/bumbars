@@ -31,7 +31,7 @@ draft → proposed → awaiting_confirmation → scheduled/running → resolved,
 
 ## Реализованный адаптер прототипа
 
-Развёрнутый Sites-срез использует D1 binding `DB`. Публичные route handlers не принимают произвольные деньги, длительность или эффекты: клиент передаёт только намерение или тип каталожного действия, доменный сервер выбирает допустимые параметры сам.
+Развёрнутый Sites-срез использует D1 binding `DB`. Публичные route handlers не принимают произвольные деньги, длительность или эффекты: клиент передаёт только намерение или тип каталожного действия. AI-контракт может классифицировать смысл, нагрузку и домен воздействия, но доменный сервер детерминированно переводит этот профиль в допустимые числа.
 
 Подтверждение использует условный переход и уникальный transition token внутри атомарного D1 batch. Денежный эффект создаёт JournalEntry и парные JournalPosting; reference и idempotency предотвращают повтор. Просроченные действия reconciled при чтении состояния; целевой scheduler остаётся отдельным persistent worker.
 
@@ -41,4 +41,4 @@ draft → proposed → awaiting_confirmation → scheduled/running → resolved,
 
 ## Текущая AI-интеграция
 
-`GeminiAgentPlatformProvider` вызывает `aiplatform.googleapis.com` по REST API v1 и получает schema-bound JSON `conversation | clarification | intent`. В runtime передаются только recent conversation, релевантные versioned playbooks и видимый персонажу контекст. AI не назначает стоимость, время, вероятность, права или эффекты и не имеет SQL/tool-доступа. При ошибке провайдера используется тот же контракт с deterministic fallback; перед AI работает обязательный server safety-gate.
+`GeminiAgentPlatformProvider` вызывает `aiplatform.googleapis.com` по REST API v1 и получает schema-bound JSON `conversation | clarification | intent`. Для intent модель возвращает семантический профиль: duration/cost/effort bands, основной и вторичный домен воздействия, релевантный навык и при необходимости название возникающей характеристики. В runtime передаются только recent conversation, versioned playbooks и видимый персонажу контекст. AI не назначает канонические числа, не имеет SQL/tool-доступа и не применяет эффект; сервер проверяет профиль и рассчитывает итоговые параметры. При ошибке провайдера используется тот же контракт с deterministic fallback; перед AI работает обязательный server safety-gate.
