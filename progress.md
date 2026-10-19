@@ -61,3 +61,7 @@
 - карьерный, рыночный, контрактный, escrow и deterministic PvP engines;
 - role-aware NPC continuation и event graph;
 - eval-набор для Gemini, prompt/version rollout и observability.
+
+## 2026-10-19 — организация GitHub
+
+Добавлены CI для Gitleaks, lint, typecheck и сборки; конфигурация pre-commit, обновления Dependabot и общий порядок Pull Request. Для ложного срабатывания разрешён только точный SQL-маркер `economy-usd-v1` в `lib/server/game.ts`. Интеграционные smoke-сценарии по-прежнему требуют отдельной тестовой среды.
