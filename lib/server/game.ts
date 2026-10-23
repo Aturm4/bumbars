@@ -360,20 +360,20 @@ async function reconcileDueActions(db: D1Database): Promise<void> {
     const actionPayload = safeJson(action.payload_json);
     const statements: D1PreparedStatement[] = [
       db.prepare(`UPDATE actions SET status = 'resolved', resolved_at = ?, outcome = ?, transition_token = ? WHERE id = ? AND player_id = ? AND status = 'running' AND due_at <= ?`).bind(now, outcome, token, action.id, PLAYER_ID, now),
-      db.prepare(`UPDATE action_mechanics SET roll_bp = ?, succeeded = ?, resolved_at = ? WHERE action_id = ? AND roll_bp IS NULL`).bind(rollBp, succeeded ? 1 : 0, now, action.id),
+      db.prepare(`UPDATE action_mechanics SET roll_bp = ?, succeeded = ?, resolved_at = ? WHERE action_id = ? AND roll_bp IS NULL AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(rollBp, succeeded ? 1 : 0, now, action.id, action.id, token),
       db.prepare(`UPDATE players SET energy = MIN(100, MAX(0, energy + ?)), health = MIN(100, MAX(0, health + ?)) WHERE id = ? AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(energy, health, PLAYER_ID, action.id, token),
       db.prepare(`UPDATE characters SET morale = MIN(100, MAX(0, morale + ?)), confidence = MIN(100, MAX(0, confidence + ?)), fatigue = MIN(100, MAX(0, fatigue + ?)) WHERE id = ? AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(morale, confidence, fatigue, CHARACTER_ID, action.id, token),
       db.prepare(`UPDATE character_conditions SET strength = MIN(100, MAX(0, strength + ?)), intelligence = MIN(100, MAX(0, intelligence + ?)), updated_at = ? WHERE character_id = ? AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(strength, intelligence, now, CHARACTER_ID, action.id, token),
       db.prepare(`INSERT INTO domain_events (id, player_id, type, title, body, action_id, created_at) SELECT ?, ?, 'action_resolved', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(uid('event'), PLAYER_ID, succeeded ? 'Действие завершено' : 'Попытка завершена', outcome, action.id, now, action.id, token),
-      db.prepare(`INSERT OR IGNORE INTO experience_events (id, character_id, domain, title, outcome, complexity, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)`).bind(`experience-${action.id}`, CHARACTER_ID, action.skill_domain ?? action.kind, action.title, succeeded ? 'success' : 'failure', action.difficulty_label.toLowerCase(), now),
-      db.prepare(`UPDATE daily_plan_items SET status = ?, updated_at = ? WHERE action_id = ?`).bind(succeeded || action.resolution_mode === 'progress' ? 'completed' : 'completed', now, action.id),
+      db.prepare(`INSERT OR IGNORE INTO experience_events (id, character_id, domain, title, outcome, complexity, occurred_at) SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(`experience-${action.id}`, CHARACTER_ID, action.skill_domain ?? action.kind, action.title, succeeded ? 'success' : 'failure', action.difficulty_label.toLowerCase(), now, action.id, token),
+      db.prepare(`UPDATE daily_plan_items SET status = 'completed', updated_at = ? WHERE action_id = ? AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(now, action.id, action.id, token),
       db.prepare(`INSERT INTO chat_messages (id, player_id, role, source, body, created_at) SELECT ?, ?, 'host', 'SYSTEM', ?, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(uid('chat'), PLAYER_ID, outcome, now, action.id, token),
       db.prepare(`INSERT INTO notifications (id, player_id, sender_name, category, title, body, status, can_accept, can_reply, payload_json, created_at, updated_at) SELECT ?, ?, 'Хост', 'system', ?, ?, 'unread', 0, 0, '{}', ?, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(uid('notice'), PLAYER_ID, succeeded ? 'Действие завершено' : 'Попытка завершена', outcome, now, now, action.id, token),
     ];
     if (action.skill_name) {
-      statements.push(db.prepare(`INSERT INTO skills (id, character_id, name, domain, competence, evidence_count) VALUES (?, ?, ?, ?, ?, 1)
+      statements.push(db.prepare(`INSERT INTO skills (id, character_id, name, domain, competence, evidence_count) SELECT ?, ?, ?, ?, ?, 1 WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)
         ON CONFLICT(character_id, name) DO UPDATE SET competence = MIN(100, competence + ?), evidence_count = evidence_count + 1`)
-        .bind(uid('skill'), CHARACTER_ID, action.skill_name, action.skill_domain ?? 'Развитие', grade === 'сильный' ? 2 : 1, grade === 'сильный' ? 2 : 1));
+        .bind(uid('skill'), CHARACTER_ID, action.skill_name, action.skill_domain ?? 'Развитие', grade === 'сильный' ? 2 : 1, action.id, token, grade === 'сильный' ? 2 : 1));
     }
     const metricKey = typeof actionPayload.dynamicMetricKey === 'string' ? actionPayload.dynamicMetricKey : '';
     const metricLabel = typeof actionPayload.dynamicMetricLabel === 'string' ? actionPayload.dynamicMetricLabel : '';
@@ -710,11 +710,11 @@ export async function confirmAction(actionId: string): Promise<GameState> {
       : 'Готово. Договорённость появилась в плане дня.';
     const statements: D1PreparedStatement[] = [
       db.prepare(`UPDATE actions SET status = 'resolved', confirmed_at = ?, resolved_at = ?, outcome = ?, transition_token = ? WHERE id = ? AND player_id = ? AND status = 'awaiting_confirmation'`).bind(now, now, 'Договорённость добавлена в план дня.', token, action.id, PLAYER_ID),
-      db.prepare(`UPDATE action_mechanics SET roll_bp = 0, succeeded = 1, resolved_at = ? WHERE action_id = ?`).bind(now, action.id),
+      db.prepare(`UPDATE action_mechanics SET roll_bp = 0, succeeded = 1, resolved_at = ? WHERE action_id = ? AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(now, action.id, action.id, token),
       db.prepare(`INSERT INTO daily_plan_items (id, player_id, action_id, title, details, scheduled_for, start_condition, status, source, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, ?, 'planned', 'HOST', ?, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(uid('plan'), PLAYER_ID, action.id, action.title, scheduleText, scheduledFor, startCondition, now, now, action.id, token),
       db.prepare(`INSERT INTO chat_messages (id, player_id, role, source, body, created_at) SELECT ?, ?, 'host', 'SYSTEM', ?, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(uid('chat'), PLAYER_ID, reply, now, action.id, token),
     ];
-    if (recurring) statements.push(db.prepare(`INSERT OR IGNORE INTO routines (id, player_id, title, schedule_label, duration_minutes, streak, status, skip_next, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, 'active', 0, ?, ?)`).bind(`routine-${action.id}`, PLAYER_ID, action.title, scheduleText, durationMinutes, now, now));
+    if (recurring) statements.push(db.prepare(`INSERT OR IGNORE INTO routines (id, player_id, title, schedule_label, duration_minutes, streak, status, skip_next, created_at, updated_at) SELECT ?, ?, ?, ?, ?, 0, 'active', 0, ?, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(`routine-${action.id}`, PLAYER_ID, action.title, scheduleText, durationMinutes, now, now, action.id, token));
     await db.batch(statements);
     return getGameState();
   }
@@ -725,16 +725,20 @@ export async function confirmAction(actionId: string): Promise<GameState> {
     const target = await db.prepare('SELECT id FROM players WHERE lower(name) = lower(?) AND id != ? LIMIT 1').bind(targetName, PLAYER_ID).first<{ id: string }>();
     if (!target) throw new DomainError('Участник для вызова не найден', 'TARGET_NOT_FOUND', 404);
     const state = await getGameState();
-    if (!Number.isFinite(stake) || stake <= 0 || stake > state.wallet.availableCents) throw new DomainError('Для этой ставки недостаточно свободных денег', 'NOT_ENOUGH_MONEY', 409);
+    if (!Number.isSafeInteger(stake) || stake <= 0 || stake > state.wallet.availableCents) throw new DomainError('Для этой ставки недостаточно свободных денег', 'NOT_ENOUGH_MONEY', 409);
     const token = uid('challenge');
     const outcome = `Вызов отправлен ${targetName}. Ставка ${formatUsd(stake)} зарезервирована; поединок не начнётся без согласия второй стороны.`;
-    await db.batch([
-      db.prepare(`UPDATE actions SET status = 'resolved', confirmed_at = ?, resolved_at = ?, outcome = ?, transition_token = ? WHERE id = ? AND player_id = ? AND status = 'awaiting_confirmation'`).bind(now, now, outcome, token, action.id, PLAYER_ID),
-      db.prepare(`UPDATE action_mechanics SET roll_bp = 0, succeeded = 1, resolved_at = ? WHERE action_id = ?`).bind(now, action.id),
-      db.prepare(`INSERT OR IGNORE INTO fund_reservations (id, player_id, reference_type, reference_id, amount_cents, status, created_at, released_at) VALUES (?, ?, 'challenge', ?, ?, 'held', ?, NULL)`).bind(uid('reserve'), PLAYER_ID, action.id, stake, now),
-      db.prepare(`INSERT INTO notifications (id, player_id, sender_name, category, title, body, status, can_accept, can_reply, payload_json, created_at, updated_at) VALUES (?, ?, ?, 'challenge', 'Вызов на поединок', ?, 'unread', 1, 1, ?, ?, ?)`).bind(uid('notice'), target.id, state.player.name, `${state.player.name} предлагает поединок. Ставка каждой стороны: ${formatUsd(stake)}.`, JSON.stringify({ actionId: action.id, stakeCents: stake, senderPlayerId: PLAYER_ID }), now, now),
-      db.prepare(`INSERT INTO chat_messages (id, player_id, role, source, body, created_at) VALUES (?, ?, 'host', 'SYSTEM', ?, ?)`).bind(uid('chat'), PLAYER_ID, outcome, now),
+    const results = await db.batch([
+      db.prepare(`UPDATE actions SET status = 'resolved', confirmed_at = ?, resolved_at = ?, outcome = ?, transition_token = ? WHERE id = ? AND player_id = ? AND status = 'awaiting_confirmation' AND EXISTS (SELECT 1 FROM wallets w WHERE w.player_id = ? AND w.balance_cents - (SELECT COALESCE(SUM(amount_cents), 0) FROM fund_reservations WHERE player_id = w.player_id AND status = 'held') >= ?)`).bind(now, now, outcome, token, action.id, PLAYER_ID, PLAYER_ID, stake),
+      db.prepare(`UPDATE action_mechanics SET roll_bp = 0, succeeded = 1, resolved_at = ? WHERE action_id = ? AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(now, action.id, action.id, token),
+      db.prepare(`INSERT OR IGNORE INTO fund_reservations (id, player_id, reference_type, reference_id, amount_cents, status, created_at, released_at) SELECT ?, ?, 'challenge', ?, ?, 'held', ?, NULL WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(uid('reserve'), PLAYER_ID, action.id, stake, now, action.id, token),
+      db.prepare(`INSERT INTO notifications (id, player_id, sender_name, category, title, body, status, can_accept, can_reply, payload_json, created_at, updated_at) SELECT ?, ?, ?, 'challenge', 'Вызов на поединок', ?, 'unread', 1, 1, ?, ?, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(uid('notice'), target.id, state.player.name, `${state.player.name} предлагает поединок. Ставка каждой стороны: ${formatUsd(stake)}.`, JSON.stringify({ actionId: action.id, stakeCents: stake, senderPlayerId: PLAYER_ID }), now, now, action.id, token),
+      db.prepare(`INSERT INTO chat_messages (id, player_id, role, source, body, created_at) SELECT ?, ?, 'host', 'SYSTEM', ?, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(uid('chat'), PLAYER_ID, outcome, now, action.id, token),
     ]);
+    if (!results[0].meta.changes) {
+      const current = await db.prepare('SELECT status FROM actions WHERE id = ? AND player_id = ?').bind(action.id, PLAYER_ID).first<{ status: ActionStatus }>();
+      if (current?.status !== 'resolved') throw new DomainError('Предложение или доступные средства изменились', 'RESOURCES_CHANGED', 409);
+    }
     return getGameState();
   }
 
@@ -754,7 +758,7 @@ export async function confirmAction(actionId: string): Promise<GameState> {
   const dueAt = new Date(Date.now() + Math.max(1, action.duration_seconds) * 1000).toISOString();
   const token = uid('confirm');
   const statements: D1PreparedStatement[] = [
-    db.prepare(`UPDATE actions SET status = 'running', confirmed_at = ?, due_at = ?, transition_token = ? WHERE id = ? AND player_id = ? AND status = 'awaiting_confirmation' AND EXISTS (SELECT 1 FROM wallets WHERE player_id = ? AND balance_cents >= ?) AND EXISTS (SELECT 1 FROM players WHERE id = ? AND energy >= ?)`).bind(now, dueAt, token, actionId, PLAYER_ID, PLAYER_ID, action.cost_cents, PLAYER_ID, action.energy_cost),
+    db.prepare(`UPDATE actions SET status = 'running', confirmed_at = ?, due_at = ?, transition_token = ? WHERE id = ? AND player_id = ? AND status = 'awaiting_confirmation' AND EXISTS (SELECT 1 FROM wallets w WHERE w.player_id = ? AND w.balance_cents - (SELECT COALESCE(SUM(amount_cents), 0) FROM fund_reservations WHERE player_id = w.player_id AND status = 'held') >= ?) AND EXISTS (SELECT 1 FROM players WHERE id = ? AND energy >= ?) AND (? != 'foreground' OR NOT EXISTS (SELECT 1 FROM actions busy JOIN action_mechanics mechanics ON mechanics.action_id = busy.id WHERE busy.player_id = ? AND busy.status = 'running' AND mechanics.capacity = 'foreground' AND busy.id != ?))`).bind(now, dueAt, token, actionId, PLAYER_ID, PLAYER_ID, action.cost_cents, PLAYER_ID, action.energy_cost, action.capacity, PLAYER_ID, actionId),
     db.prepare(`UPDATE wallets SET balance_cents = balance_cents - ? WHERE player_id = ? AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(action.cost_cents, PLAYER_ID, actionId, token),
     db.prepare(`UPDATE players SET energy = MAX(0, energy - ?) WHERE id = ? AND EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(action.energy_cost, PLAYER_ID, actionId, token),
     db.prepare(`INSERT INTO daily_plan_items (id, player_id, action_id, title, details, scheduled_for, start_condition, status, source, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, 'NOW', 'running', 'HOST', ?, ? WHERE EXISTS (SELECT 1 FROM actions WHERE id = ? AND transition_token = ?)`).bind(uid('plan'), PLAYER_ID, action.id, action.title, action.description, now, now, now, action.id, token),
@@ -830,23 +834,29 @@ export async function respondNotification(notificationId: string, input: { actio
   if (action === 'read') {
     await db.prepare("UPDATE notifications SET status = CASE WHEN status = 'unread' THEN 'read' ELSE status END, updated_at = ? WHERE id = ?").bind(now, notificationId).run();
   } else if (action === 'accept' || action === 'decline') {
+    if (row.status === 'accepted' || row.status === 'declined') return getGameState();
     if (!Boolean(row.can_accept)) throw new DomainError('Для этого уведомления нет такого решения', 'NOTIFICATION_NOT_ACTIONABLE', 409);
-    if (action === 'accept' && String(row.category) === 'challenge') {
+    const challenge = action === 'accept' && String(row.category) === 'challenge';
+    const reserveId = uid('reserve');
+    let stake = 0;
+    if (challenge) {
       const payload = safeJson(String(row.payload_json));
-      const stake = Number(payload.stakeCents ?? 0);
+      stake = Number(payload.stakeCents ?? 0);
       const state = await getGameState();
-      if (stake > state.wallet.availableCents) throw new DomainError(`Для принятия вызова нужно ${formatUsd(stake)}, доступно ${formatUsd(state.wallet.availableCents)}.`, 'NOT_ENOUGH_MONEY', 409);
-      await db.prepare(`INSERT OR IGNORE INTO fund_reservations (id, player_id, reference_type, reference_id, amount_cents, status, created_at, released_at) VALUES (?, ?, 'challenge-response', ?, ?, 'held', ?, NULL)`).bind(uid('reserve'), PLAYER_ID, notificationId, stake, now).run();
+      if (!Number.isSafeInteger(stake) || stake <= 0 || stake > state.wallet.availableCents) throw new DomainError(`Для принятия вызова нужно ${formatUsd(stake)}, доступно ${formatUsd(state.wallet.availableCents)}.`, 'NOT_ENOUGH_MONEY', 409);
     }
-    await db.prepare('UPDATE notifications SET status = ?, updated_at = ? WHERE id = ?').bind(action === 'accept' ? 'accepted' : 'declined', now, notificationId).run();
-    await db.prepare(`INSERT INTO chat_messages (id, player_id, role, source, body, created_at) VALUES (?, ?, 'host', 'SYSTEM', ?, ?)`).bind(uid('chat'), PLAYER_ID, action === 'accept' ? 'Решение принято и сохранено. Сервер проверил доступные ресурсы.' : 'Предложение отклонено. Деньги и состояние не изменились.', now).run();
+    const statements = [db.prepare(`UPDATE notifications SET status = ?, can_accept = 0, updated_at = ? WHERE id = ? AND player_id = ? AND can_accept = 1 AND status NOT IN ('accepted', 'declined') AND (? = 0 OR EXISTS (SELECT 1 FROM wallets w WHERE w.player_id = ? AND w.balance_cents - (SELECT COALESCE(SUM(amount_cents), 0) FROM fund_reservations WHERE player_id = w.player_id AND status = 'held') >= ?))`).bind(action === 'accept' ? 'accepted' : 'declined', now, notificationId, PLAYER_ID, challenge ? 1 : 0, PLAYER_ID, stake)];
+    if (challenge) statements.push(db.prepare(`INSERT OR IGNORE INTO fund_reservations (id, player_id, reference_type, reference_id, amount_cents, status, created_at, released_at) SELECT ?, ?, 'challenge-response', ?, ?, 'held', ?, NULL WHERE changes() = 1`).bind(reserveId, PLAYER_ID, notificationId, stake, now));
+    statements.push(db.prepare(`INSERT INTO chat_messages (id, player_id, role, source, body, created_at) SELECT ?, ?, 'host', 'SYSTEM', ?, ? WHERE ${challenge ? 'EXISTS (SELECT 1 FROM fund_reservations WHERE id = ?)' : 'changes() = 1'}`).bind(uid('chat'), PLAYER_ID, action === 'accept' ? 'Решение принято и сохранено. Сервер проверил доступные ресурсы.' : 'Предложение отклонено. Деньги и состояние не изменились.', now, ...(challenge ? [reserveId] : [])));
+    const results = await db.batch(statements);
+    if (!results[0].meta.changes) throw new DomainError('Решение или доступные средства изменились', 'RESOURCES_CHANGED', 409);
   } else if (action === 'reply') {
     const reply = typeof input.reply === 'string' ? input.reply.trim() : '';
     if (!Boolean(row.can_reply) || !reply || reply.length > 500) throw new DomainError('Ответ должен содержать от 1 до 500 символов', 'INVALID_NOTIFICATION_REPLY');
     await db.batch([
-      db.prepare("UPDATE notifications SET status = 'replied', updated_at = ? WHERE id = ?").bind(now, notificationId),
-      db.prepare(`INSERT INTO chat_messages (id, player_id, role, source, body, created_at) VALUES (?, ?, 'player', 'INBOX', ?, ?)`).bind(uid('chat'), PLAYER_ID, `Ответ для ${String(row.sender_name)}: ${reply}`, now),
-      db.prepare(`INSERT INTO chat_messages (id, player_id, role, source, body, created_at) VALUES (?, ?, 'host', 'SYSTEM', 'Ответ сохранён. Если отправитель — NPC, его следующая реакция будет рассчитана из роли и доступного контекста.', ?)`).bind(uid('chat'), PLAYER_ID, now),
+      db.prepare("UPDATE notifications SET status = CASE WHEN status IN ('accepted', 'declined') THEN status ELSE 'replied' END, updated_at = ? WHERE id = ? AND player_id = ? AND can_reply = 1").bind(now, notificationId, PLAYER_ID),
+      db.prepare(`INSERT INTO chat_messages (id, player_id, role, source, body, created_at) SELECT ?, ?, 'player', 'INBOX', ?, ? WHERE changes() = 1`).bind(uid('chat'), PLAYER_ID, `Ответ для ${String(row.sender_name)}: ${reply}`, now),
+      db.prepare(`INSERT INTO chat_messages (id, player_id, role, source, body, created_at) SELECT ?, ?, 'host', 'SYSTEM', 'Ответ сохранён. Если отправитель — NPC, его следующая реакция будет рассчитана из роли и доступного контекста.', ? WHERE changes() = 1`).bind(uid('chat'), PLAYER_ID, now),
     ]);
   } else throw new DomainError('Неизвестная команда уведомления', 'INVALID_NOTIFICATION_ACTION');
   return getGameState();

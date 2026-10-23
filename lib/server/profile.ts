@@ -238,7 +238,7 @@ export async function getExtendedState(db: D1Database, playerId: string): Promis
     db.prepare('SELECT * FROM assets WHERE owner_id = ? ORDER BY estimated_value_cents DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare(`SELECT o.*, m.role, s.basis_points FROM organizations o JOIN organization_memberships m ON m.organization_id = o.id JOIN ownership_stakes s ON s.organization_id = o.id AND s.owner_id = m.character_id WHERE m.character_id = ?`).bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM relationships WHERE character_id = ? ORDER BY trust DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
-    db.prepare('SELECT * FROM reputation_scores WHERE character_id = ? ORDER BY value DESC').bind(CHARACTER_ID).all<Record<string, unknown>>(),
+    db.prepare("SELECT * FROM reputation_scores WHERE character_id = ? AND visibility IN ('public', 'private') ORDER BY value DESC").bind(CHARACTER_ID).all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM goals WHERE character_id = ? AND status = ?').bind(CHARACTER_ID, 'active').all<Record<string, unknown>>(),
     db.prepare("SELECT * FROM world_events WHERE visibility = 'public' ORDER BY happened_at DESC LIMIT 8").all<Record<string, unknown>>(),
     db.prepare('SELECT * FROM markets ORDER BY trend DESC').all<Record<string, unknown>>(),
